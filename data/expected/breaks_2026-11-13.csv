@@ -1,0 +1,12 @@
+fund,isin,ticker,break_type,note
+GEF,GBR3LW8A64K6,AZN,Quantity Break,"Unsettled buy of 5,700 booked in accounting"
+USCB,US5LUL96E7J1,FNMA 6.0 2054,Quantity Break,"Unsettled buy of 1,100,000 booked in accounting"
+ISC,NLQHA8133GS4,ENX,Price Break,Accounting price 3.5% above custodian (vendor diff)
+USCB,US9QSJ4CHA00,UST 4.25 2034,Price Break,Accounting price 1.2% above custodian (vendor diff)
+GEF,US3XRMJ8A4N8,NVDA,Missing Trade,Position in accounting only; settlement failed at custodian
+ISC,JP867X55XJL4,4385,Missing Trade,Position at custodian only; trade not booked in accounting
+GEF,NLK0DRNYP3K6,ASML,Corporate Action,"2:1 stock split applied at custodian, not in accounting"
+EMD,BRF26WYWG9C1,NTN-F 10 2033,FX Rate,Accounting BRL rate stale (prior-day fixing)
+EMD,BRK63YVC62L1,NTN-F 10 2031,FX Rate,Accounting BRL rate stale (prior-day fixing)
+USCB,CASH-USD-USCB,USD,Cash Break,"Coupon receipt $48,250 at custodian not booked in accounting"
+ISC,CHDEQ2M48KM7,LOGN,Static Data,Accounting security master has EUR; trades in CHF

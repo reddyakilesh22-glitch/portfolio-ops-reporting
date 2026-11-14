@@ -1,0 +1,50 @@
+# Source-file layouts. Columns are matched by header text, never by position,
+# so a vendor inserting or reordering columns can't silently shift values.
+# Keys are our canonical names; values are the header text in the source file.
+
+custodian:
+  file_pattern: "custodian_holdings_{yyyymmdd}.xlsx"
+  header_marker: ISIN          # header row = first row containing this cell
+  max_header_scan_rows: 20
+  as_of_prefix: "As of:"
+  as_of_format: "%d-%b-%Y"
+  total_label: Total           # statement control total row
+  columns:
+    account: Account
+    isin: ISIN
+    description: Security Description
+    ticker: Ticker
+    asset_class: Asset Type
+    currency: Ccy
+    quantity: Shares/Par Value
+    price: Local Price
+    local_mv: Local Market Value
+    fx_rate: FX Rate
+    base_mv: Base Market Value (USD)
+
+accounting:
+  file_pattern: "fund_accounting_positions_{yyyymmdd}.xlsx"
+  sheet: Positions
+  columns:
+    fund_code: Fund Code
+    isin: Security ID
+    ticker: Ticker
+    description: Description
+    asset_class: Asset Class
+    currency: Local Ccy
+    quantity: Quantity
+    price: Price (Local)
+    local_mv: MV Local
+    fx_rate: FX Rate
+    base_mv: MV Base
+    accrued_base: Accrued Income Base
+    pricing_source: Pricing Source
+    position_date: Position Date
+
+fx:
+  file_pattern: "fx_rates_{yyyymmdd}.xlsx"
+  sheet: Rates
+  columns:
+    currency: Currency
+    units_per_usd: Units per USD
+    rate_date: Rate Date

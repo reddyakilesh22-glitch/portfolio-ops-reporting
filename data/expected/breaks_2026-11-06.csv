@@ -1,0 +1,4 @@
+fund,isin,ticker,break_type,note
+GEF,GB7A2UX3XA53,SHEL,Quantity Break,"Unsettled buy of 15,700 booked in accounting"
+MAI,USDRY4NNM386,SPY,Price Break,Accounting price 3.5% above custodian (vendor diff)
+MAI,USK7TZVWNJE9,HYG,Missing Trade,Position in accounting only; settlement failed at custodian

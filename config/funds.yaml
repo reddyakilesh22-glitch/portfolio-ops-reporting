@@ -1,0 +1,25 @@
+# Fund reference data. `code` is the fund accounting system's key; the
+# custodian identifies funds by account number and uses `custodian_sheet`
+# as the worksheet name in its holdings statement.
+base_currency: USD
+funds:
+  - code: GEF
+    name: Global Equity Fund
+    custodian_account: 4471-GEF-01
+    custodian_sheet: "4471-GEF-01"
+  - code: USCB
+    name: US Core Bond Fund
+    custodian_account: 4471-UCB-02
+    custodian_sheet: "4471-UCB-02"
+  - code: EMD
+    name: Emerging Markets Debt Fund
+    custodian_account: 4471-EMD-03
+    custodian_sheet: "4471-EMD-03"
+  - code: ISC
+    name: International Small Cap Fund
+    custodian_account: 4471-ISC-04
+    custodian_sheet: "4471-ISC-04"
+  - code: MAI
+    name: Multi-Asset Income Fund
+    custodian_account: 4471-MAI-05
+    custodian_sheet: "4471-MAI-05"
