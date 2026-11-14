@@ -1,0 +1,21 @@
+# Reconciliation tolerances. A difference inside tolerance is not a break.
+tolerances:
+  quantity_abs: 0.01           # shares / par
+  base_mv_abs_usd: 25.00       # rounding between systems is a few dollars
+  price_rel: 0.0005            # 5 bp relative price difference
+  local_mv_rel: 0.00005        # used to tell an FX break from a price/qty break
+
+# A quantity ratio near one of these, with market value roughly unchanged,
+# is classified as an unprocessed corporate action (split / reverse split).
+corporate_action:
+  ratios: [2.0, 3.0, 4.0, 1.5, 0.5, 0.3333, 0.25]
+  ratio_tol: 0.001
+  mv_rel_tol: 0.005
+
+# Materiality bands for the report (absolute USD base MV difference).
+materiality:
+  high: 1000000
+  medium: 100000
+
+# FX: accounting rates must match the official 4pm file within this tolerance.
+fx_rate_rel_tol: 0.0001

@@ -9,9 +9,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -179,10 +182,8 @@ def issues_to_frame(issues: list[dict], field_ids: dict[str, str]) -> pd.DataFra
     return df
 
 
-def extract_ops_tickets(
-    client: JiraClient | None = None, jql: str | None = None
-) -> pd.DataFrame:
-    """Pull all ops tickets for the configured project as a flat DataFrame."""
+def fetch_snapshot(client: JiraClient | None = None, jql: str | None = None) -> dict:
+    """Pull raw issues plus the field-id mapping used to read them."""
     client = client or JiraClient()
     cfg = load_yaml("jira_fields.yaml")
     field_ids = client.resolve_custom_fields(cfg)
@@ -190,4 +191,42 @@ def extract_ops_tickets(
     fields = [*cfg["system_fields"], *field_ids.values()]
     issues = list(client.search(jql, fields))
     log.info("Extracted %d issues from Jira", len(issues))
-    return issues_to_frame(issues, field_ids)
+    return {
+        "extracted_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "jql": jql,
+        "field_ids": field_ids,
+        "issues": issues,
+    }
+
+
+_STRIP_KEYS = {"self", "iconUrl", "avatarUrls", "expand", "accountId", "emailAddress"}
+
+
+def _sanitize(obj: Any) -> Any:
+    """Drop site URLs and account identifiers; keep ticket content."""
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items() if k not in _STRIP_KEYS}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    return obj
+
+
+def save_snapshot(snapshot: dict, path: Path) -> None:
+    """Persist the raw pull (sanitized) so a report run can be reproduced offline."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_sanitize(snapshot), indent=1), encoding="utf-8")
+
+
+def load_snapshot(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def snapshot_to_frame(snapshot: dict) -> pd.DataFrame:
+    return issues_to_frame(snapshot["issues"], snapshot["field_ids"])
+
+
+def extract_ops_tickets(
+    client: JiraClient | None = None, jql: str | None = None
+) -> pd.DataFrame:
+    """Pull all ops tickets for the configured project as a flat DataFrame."""
+    return snapshot_to_frame(fetch_snapshot(client, jql))

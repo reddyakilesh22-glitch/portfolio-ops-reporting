@@ -1,6 +1,6 @@
 [project]
 name = "opsreport"
-version = "0.1.0"
+version = "0.2.0"
 description = "Weekly portfolio operations reporting: reconciliation breaks, AUM, and Jira ops-ticket SLAs."
 requires-python = ">=3.11"
 

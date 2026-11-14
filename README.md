@@ -13,8 +13,31 @@ tickets that track those breaks in Jira.
 |---|---|
 | Jira extract (REST v3, `search/jql` paging, name-based field mapping) | done |
 | Excel extract (custodian, fund accounting, FX workbooks) | done |
-| Validation, reconciliation, Excel report | next |
-| AI commentary with numeric guardrails | planned |
+| Validation, reconciliation, AUM, Jira SLA metrics, Excel report | done |
+| Incidents, runbook, AI commentary with numeric guardrails | next |
+
+## Run the weekly report
+
+```bash
+python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06            # offline (Jira snapshot)
+python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06 --jira live  # pull Jira, save snapshot
+```
+
+Writes `output/<date>/portfolio_ops_report_<yyyymmdd>.xlsx` plus `breaks_*.csv`,
+`data_quality_*.csv`, and `output/run.log`. Exit code 2 = data-quality ERROR
+(nothing published; re-run with `--allow-errors` to force).
+
+**Pipeline:** extract (Excel + Jira) -> validate -> reconcile -> AUM / SLA metrics -> report
+
+| Report tab | Contents |
+|---|---|
+| Summary | KPI tiles, commentary, AUM by fund with week-over-week change, breaks by type |
+| Breaks | Every custodian vs accounting break with type, materiality, likely cause |
+| AUM | Securities MV, cash, accrued income, AUM, custodian comparison, chart |
+| Ops SLA | Open/overdue by team, aging buckets, 8-week trend chart |
+| Overdue Tickets | Open Jira tickets past SLA, oldest first |
+| Data Quality | Every ERROR / WARNING with the record it applies to |
+| Run Info | Inputs with SHA-256, row counts, git commit, versions (audit trail) |
 
 ## Setup
 
@@ -61,3 +84,17 @@ cash, static data). Tests assert the reconciliation finds exactly these.
 - **Date guard.** Each file's internal as-of date must match the run date.
 - **Control total.** Loaded custodian market value must tie to the statement's own
   Total row within $1, so dropped or mis-parsed rows stop the run.
+
+## Reconciliation and metrics design notes
+
+- **Classification order.** Missing trade -> cash -> static data -> corporate action ->
+  quantity -> price -> FX -> unexplained. Order matters: a currency mismatch also
+  moves base MV, so it must be caught as static data before the FX rule.
+- **Quantity and value are checked separately.** A 2:1 split shows ~$0 MV difference;
+  only the quantity check catches it.
+- **Answer-key tests.** The reconciliation must return exactly the planted breaks
+  for both dates: no misses, no false positives, and sub-tolerance rounding ignored.
+- **Point-in-time SLA metrics.** "Open as of D" uses business dates, so re-running a
+  past week reproduces what was reported that week.
+- **Offline reproducibility.** Every live Jira pull saves a sanitized snapshot
+  (no site URLs or account ids); runs default to the snapshot.
