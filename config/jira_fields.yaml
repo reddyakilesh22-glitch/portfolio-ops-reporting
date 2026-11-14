@@ -1,0 +1,62 @@
+# Logical field name -> Jira field *display name*.
+# The extractor resolves display names to customfield_XXXXX ids at runtime,
+# so ids are never hardcoded. If an admin renames a field in Jira, update the
+# name here (or add it to `aliases`) -- the run fails loudly until you do.
+
+project_key_env: JIRA_PROJECT_KEY
+
+custom_fields:
+  fund:
+    name: Fund
+    type: select
+    options:
+      - Global Equity Fund
+      - US Core Bond Fund
+      - Emerging Markets Debt Fund
+      - International Small Cap Fund
+      - Multi-Asset Income Fund
+  ops_team:
+    name: Ops Team
+    type: select
+    options:
+      - Reconciliation
+      - Trade Support
+      - Corporate Actions
+      - NAV Oversight
+      - Reference Data
+  break_type:
+    name: Break Type
+    type: select
+    options:
+      - Quantity Break
+      - Price Break
+      - Cash Break
+      - Missing Trade
+      - Corporate Action
+      - FX Rate
+      - Static Data
+  break_amount_usd:
+    name: Break Amount (USD)
+    type: number
+  business_date:
+    name: Business Date
+    type: date
+  resolved_business_date:
+    name: Resolved Business Date
+    type: date
+
+# Old display names still accepted for a field (e.g. after a rename).
+aliases: {}
+
+# System fields pulled on every extract.
+system_fields:
+  - summary
+  - status
+  - priority
+  - issuetype
+  - assignee
+  - labels
+  - duedate
+  - created
+  - updated
+  - resolutiondate
