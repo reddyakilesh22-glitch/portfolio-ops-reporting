@@ -1,15 +1,17 @@
 # Incident log
 
-> **Simulated incidents.** This is a demo environment with synthetic data. Each
-> incident below was deliberately reproduced (on the demo Jira site or in the
+> **Simulated incidents.** This is a demo environment with synthetic data.
+> INC-001 to INC-003 were deliberately reproduced (on the demo Jira site or in the
 > source files) to exercise the maintenance workflow: GitHub issue, failing
-> test, fix, PR, re-run. The failures and fixes themselves are real.
+> test, fix, PR, re-run. INC-004 is a genuine latent defect found in code review
+> before it affected a report. The failures and fixes themselves are real.
 
 | ID | Date | Area | Symptom | Root cause | Fix |
 |---|---|---|---|---|---|
 | INC-001 | 2026-11-15 | Jira extract | Run stopped: `no Jira field named ['Break Amount (USD)']` | Admin renamed the custom field; resolver matched by name only | Pin field ids per site; follow renames by id with a DQ warning (#1) |
 | INC-002 | 2026-11-15 | Custodian file | Re-run for 11/13 exited 2 with 9 `duplicate_position` errors | Custodian re-issued statement in v2 format, splitting holdings by depository; we assumed one row per position | Aggregate custodian lots to fund/ISIN with consistency checks (#3) |
 | INC-003 | 2026-11-15 | Custodian file / CLI | Run crashed with a 25-line traceback: `time data '11/13/2026' does not match format '%d-%b-%Y'` | One hardcoded date format; parse error escaped as a raw `ValueError` | Configured unambiguous formats; clean one-line errors, traceback to run.log (#5) |
+| INC-004 | 2026-11-15 | Jira SLA metrics | *Near miss, found in review:* 11/27 report would overstate all 19 open tickets' age by 1 day; OPSREC-14 would show 11d+ instead of 6-10d | Business-day count had no holiday calendar | NYSE holiday calendar with coverage check (#7) |
 
 ---
 
@@ -66,3 +68,18 @@ and writes the traceback to `run.log`. Unexpected exceptions keep their tracebac
 because they are bugs.
 **Verified:** US-format date: run completes, 11 breaks. Unknown format: one clear
 line, exit 1, traceback in `run.log`.
+
+## INC-004: market holidays counted in ticket aging (issue #7, near miss)
+
+**Found:** reviewing aging logic ahead of Thanksgiving week. Nothing published wrong.
+**Root cause:** `np.busday_count` without a holiday list treats exchange holidays as
+business days.
+**Measured impact (as-of 2026-11-27):** all 19 open tickets aged +1 day; OPSREC-14
+would have crossed into the 11d+ escalation bucket; oldest open 45 instead of 44.
+**Fix:** `config/calendar.yaml` (NYSE closures 2026-2027) used by every business-day
+calculation via `opsreport/calendar.py`. Runs fail if a needed year isn't in the
+calendar, so the list can't silently run out in January. Weekend dates in the
+calendar are rejected. A run date that isn't a business day is flagged.
+**Verified:** 11/13 report unchanged (no holidays in its window); 11/27 ages correct.
+**Follow-up:** Jira `duedate` is set upstream by Jira automation and may have the
+same blind spot; raise with the Jira admin.

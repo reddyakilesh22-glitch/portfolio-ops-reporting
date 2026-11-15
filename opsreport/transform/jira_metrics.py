@@ -15,12 +15,9 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
+from opsreport.calendar import busday_count
+
 AGE_BUCKETS = [(-1, 1, "0-1d"), (1, 5, "2-5d"), (5, 10, "6-10d"), (10, 10_000, "11d+")]
-
-
-def _bdays(start: pd.Series, end: date) -> pd.Series:
-    s = pd.to_datetime(start).values.astype("datetime64[D]")
-    return pd.Series(np.busday_count(s, np.datetime64(end)), index=start.index)
 
 
 def prepare(tickets: pd.DataFrame, as_of: date) -> pd.DataFrame:
@@ -32,7 +29,7 @@ def prepare(tickets: pd.DataFrame, as_of: date) -> pd.DataFrame:
 
     resolved = df["resolved_business_date"]
     df["open_as_of"] = resolved.isna() | (resolved > as_of)
-    df["age_bdays"] = _bdays(df["business_date"], as_of)
+    df["age_bdays"] = busday_count(df["business_date"], as_of)
     df["overdue"] = df["open_as_of"] & (df["due_date"] < as_of)
     df["sla_met"] = np.where(resolved.notna() & (resolved <= as_of),
                              resolved <= df["due_date"], np.nan)

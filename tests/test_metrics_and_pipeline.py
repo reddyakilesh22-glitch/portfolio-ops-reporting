@@ -83,3 +83,41 @@ def test_pipeline_end_to_end(tmp_path):
     k = res.data.jira_kpis
     assert (k["open_tickets"], k["overdue_tickets"]) == (19, 12)
     assert (tmp_path / "2026-11-13" / "breaks_20261113.csv").exists()
+
+
+# ---- INC-004: holidays in ticket aging (issue #7) ---------------------------
+from opsreport import calendar as cal  # noqa: E402
+from opsreport.config import ConfigError  # noqa: E402
+
+
+def test_thanksgiving_not_counted_in_age():
+    biz = pd.Series([date(2026, 11, 25)])
+    assert cal.busday_count(biz, date(2026, 11, 27)).iloc[0] == 1   # Wed -> Fri, Thu closed
+    assert cal.busday_count(biz, date(2026, 11, 30)).iloc[0] == 2
+
+
+def test_day_after_thanksgiving_is_a_business_day():
+    assert not cal.is_business_day(date(2026, 11, 26))
+    assert cal.is_business_day(date(2026, 11, 27))   # early close, still open
+
+
+def test_calendar_coverage_is_enforced():
+    with pytest.raises(ConfigError, match="no entries for \\[2028\\]"):
+        cal.busday_count(pd.Series([date(2027, 12, 20)]), date(2028, 1, 5))
+
+
+def test_configured_holidays_are_weekdays():
+    days = cal.holidays().astype("datetime64[D]").astype(object)
+    assert all(d.weekday() < 5 for d in days)
+
+
+def test_aging_bucket_across_thanksgiving():
+    t = jm.prepare(pd.DataFrame([ticket("H-1", date(2026, 11, 12), date(2026, 11, 16))]),
+                   date(2026, 11, 27))
+    # Nov 12 -> Nov 27 is 11 weekdays but 10 business days (Nov 26 closed).
+    assert t.iloc[0]["age_bdays"] == 10 and t.iloc[0]["age_bucket"] == "6-10d"
+
+
+def test_business_day_as_of_not_flagged(tmp_path):
+    res = run(date(2026, 11, 13), out_dir=tmp_path)
+    assert "as_of_not_business_day" not in set(res.issues["check"])

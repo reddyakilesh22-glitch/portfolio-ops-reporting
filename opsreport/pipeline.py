@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 from opsreport import __version__
+from opsreport.calendar import is_business_day
 from opsreport.config import ROOT
 from opsreport.extract import excel_loader
 from opsreport.extract.jira_client import (
@@ -109,6 +110,10 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
     # ---- validate
     field_issues = [Issue(WARNING, "jira", "field_renamed", w)
                     for w in snap.get("field_warnings", [])]
+    if not is_business_day(as_of):
+        field_issues.append(Issue(WARNING, "run", "as_of_not_business_day",
+                                  f"{as_of} is a weekend or exchange holiday; "
+                                  "check the run date"))
     issues = issues_frame(
         field_issues
         + check_positions(cur["custodian"], cur["fx"])
