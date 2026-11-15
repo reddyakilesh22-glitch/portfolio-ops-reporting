@@ -33,9 +33,13 @@ Oversight, Trade Support, Corporate Actions, Reference Data), fund controllers.
    - Each fund's `Acct vs Custodian MV` is explained by the Breaks tab.
    - Break count isn't zero (zero usually means a file was duplicated, not a perfect week).
    - Data Quality tab: read every WARNING; none should be new without explanation.
-5. **Publish** `output/<as_of>/portfolio_ops_report_<yyyymmdd>.xlsx` to the ops
+5. **If AI commentary was used** (`--commentary local-llm`): read every bullet
+   against the Summary numbers. The guardrail checks numbers, not judgement.
+   If the label says `template (...)`, the AI draft was rejected or Ollama was
+   down; the template is fine to send. Details: `commentary_audit_<date>.json`.
+6. **Publish** `output/<as_of>/portfolio_ops_report_<yyyymmdd>.xlsx` to the ops
    distribution, with one line on anything unusual.
-6. **Commit the Jira snapshot** (`data/snapshots/jira_<as_of>.json`) so the week
+7. **Commit the Jira snapshot** (`data/snapshots/jira_<as_of>.json`) so the week
    can be reproduced later.
 
 ## 2. Re-running a past week
