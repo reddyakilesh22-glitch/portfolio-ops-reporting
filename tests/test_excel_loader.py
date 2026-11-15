@@ -88,8 +88,11 @@ def test_custodian_renamed_column_fails_loudly(raw, tmp_path):
     c, _, _ = files(raw)
 
     def rename(wb):
-        wb.worksheets[0].cell(row=6, column=11, value="Market Value (Base)")
-    with pytest.raises(SourceFileError, match="Base Market Value"):
+        ws = wb.worksheets[0]
+        cell = next(c for c in ws[6] if c.value == "Base Market Value (USD)")
+        cell.value = "Market Value (Base)"
+    with pytest.raises(SourceFileError,
+                       match=r"expected column\(s\) \['Base Market Value \(USD\)'\]"):
         load_custodian(AS_OF, edit_copy(c, tmp_path, rename))
 
 
@@ -149,3 +152,45 @@ def test_fx_missing_rate_fails(raw, tmp_path):
                 row[1].value = None
     with pytest.raises(SourceFileError, match="BRL"):
         load_fx(AS_OF, edit_copy(f, tmp_path, blank_brl))
+
+
+# ---- INC-002: custodian holdings split by depository (issue #3) -------------
+from opsreport.extract.excel_loader import aggregate_lots  # noqa: E402
+
+
+def _lot(qty, loc, price=10.0, ccy="USD", fx=1.0):
+    return {"fund_code": "GEF", "isin": "US0378331005", "ticker": "AAPL",
+            "description": "Apple", "asset_class": "Equity", "currency": ccy,
+            "quantity": qty, "price": price, "local_mv": qty * price, "fx_rate": fx,
+            "base_mv": qty * price / fx, "locations": loc}
+
+
+def test_lots_are_summed_to_one_position():
+    out = aggregate_lots(pd.DataFrame([_lot(600.0, "DTC"), _lot(400.0, "Euroclear")]))
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert (row["quantity"], row["base_mv"], row["lots"]) == (1000.0, 10000.0, 2)
+    assert row["locations"] == "DTC+Euroclear"
+
+
+def test_lots_disagreeing_on_price_fail():
+    with pytest.raises(SourceFileError, match="disagree on \\['price'\\]"):
+        aggregate_lots(pd.DataFrame([_lot(600.0, "DTC"), _lot(400.0, "Euroclear",
+                                                              price=10.5)]))
+
+
+def test_v2_statement_loads_one_row_per_holding(raw):
+    c, _, _ = files(raw)
+    df = load_custodian(AS_OF, c)
+    assert not df.duplicated(["fund_code", "isin"]).any()
+    assert (df["lots"] > 1).sum() == 9
+    assert df.loc[df["lots"] > 1, "locations"].str.contains(r"\+").all()
+
+
+def test_accounting_duplicates_still_an_error(raw):
+    from opsreport.validate.checks import check_positions
+    _, a, f = files(raw)
+    acct = load_accounting(AS_OF, a)
+    dup = pd.concat([acct, acct.iloc[[0]]], ignore_index=True)
+    checks = {i.check for i in check_positions(dup, load_fx(AS_OF, f))}
+    assert "duplicate_position" in checks

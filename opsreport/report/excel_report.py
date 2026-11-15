@@ -103,7 +103,7 @@ class _Writer:
             width = widths.get(name, 14 if kind != "text" else 18)
             ws.set_column(col + j, col + j, width)
             for i, val in enumerate(df[name].tolist(), start=1):
-                if val is None or (isinstance(val, float) and pd.isna(val)) or val is pd.NaT:
+                if val is None or (pd.api.types.is_scalar(val) and pd.isna(val)):
                     ws.write_blank(row + i, col + j, None)
                 elif kind == "date" and isinstance(val, (date, datetime, pd.Timestamp)):
                     ws.write_datetime(row + i, col + j, pd.Timestamp(val).to_pydatetime(),
@@ -221,8 +221,9 @@ def _breaks(w: _Writer, d: ReportData) -> None:
                    "higher.", w.f["subtitle"])
     cols = ["fund_code", "ticker", "break_type", "materiality", "likely_cause",
             "quantity_cust", "quantity_acct", "quantity_diff", "price_cust", "price_acct",
-            "base_mv_cust", "base_mv_acct", "base_mv_diff", "isin", "description"]
-    df = d.breaks[cols]
+            "base_mv_cust", "base_mv_acct", "base_mv_diff", "isin", "description",
+            "custodian_locations"]
+    df = d.breaks[[c for c in cols if c in d.breaks]]
     end = w.table(ws, df, 3, autofilter=True,
                   widths={"likely_cause": 60, "ticker": 16, "description": 32,
                           "break_type": 17, "isin": 15})

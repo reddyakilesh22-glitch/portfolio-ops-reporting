@@ -60,6 +60,7 @@ sheet, and record.
 | `expected column(s) [...] not found` | Vendor renamed a column | Confirm the meaning is unchanged with the vendor, then update `config/excel_layouts.yaml` |
 | `no header row containing 'ISIN'` | Layout change or wrong file | Open the file; check it is the holdings statement |
 | `unknown account sheet(s)` | New fund/account at custodian | Add it to `config/funds.yaml` once the fund code is confirmed |
+| `lots of the same holding disagree on [...]` | Custodian reports one holding at several depositories with different prices/FX | Genuine data issue at the custodian: raise with them; do not pick one lot |
 | `loaded base MV ... != statement total` | Rows dropped or mis-parsed | Look for rows with a blank or changed Account value; do not loosen the tolerance |
 | `missing or non-positive rates` / `unknown_currency` | FX file incomplete | Request a corrected FX file. Do not substitute a rate yourself |
 | `Custom field mapping failed` | Jira field renamed/deleted | See Incident INC-001 in `docs/INCIDENTS.md` |

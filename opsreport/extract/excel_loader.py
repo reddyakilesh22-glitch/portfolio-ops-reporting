@@ -142,13 +142,55 @@ def load_custodian(as_of: date, path: Path | None = None) -> pd.DataFrame:
                 f"(diff {loaded - control:,.2f}); rows were dropped or mis-parsed")
 
         positions["fund_code"] = fund["code"]
+        present = {str(c).strip(): c for c in body.columns}
+        for name, header in cfg.get("optional_columns", {}).items():
+            positions[name] = (body.loc[positions.index, present[header]]
+                               .astype("string").str.strip()
+                               if header in present else pd.NA)
         frames.append(positions)
 
-    out = pd.concat(frames, ignore_index=True)
+    rows = pd.concat(frames, ignore_index=True)
+    out = aggregate_lots(rows, path.name)
     out["source"] = "custodian"
     out["as_of"] = as_of
-    log.info("Custodian %s: %d positions across %d accounts", as_of, len(out), len(frames))
-    return out[POSITION_COLUMNS]
+    log.info("Custodian %s: %d positions (%d rows) across %d accounts",
+             as_of, len(out), len(rows), len(frames))
+    return out[[*POSITION_COLUMNS, "lots", "locations"]]
+
+
+LOT_KEYS = ["fund_code", "isin"]
+LOT_MUST_AGREE = ["ticker", "description", "asset_class", "currency", "price", "fx_rate"]
+
+
+def aggregate_lots(rows: pd.DataFrame, where: str = "custodian") -> pd.DataFrame:
+    """Collapse custodian lot/location rows to one row per fund and ISIN.
+
+    Custodians may report a holding once per depository. Quantities and market
+    values add; descriptive fields, price and FX rate must be identical across
+    lots, otherwise the file is inconsistent and the run stops.
+    """
+    g = rows.groupby(LOT_KEYS, sort=False, dropna=False)
+    disagree = [c for c in LOT_MUST_AGREE if (g[c].nunique(dropna=False) > 1).any()]
+    if disagree:
+        bad = g[disagree].nunique(dropna=False)
+        bad = bad[(bad > 1).any(axis=1)].index.tolist()
+        raise SourceFileError(f"{where}: lots of the same holding disagree on {disagree} "
+                              f"for {bad[:5]}")
+    if "locations" not in rows:
+        rows = rows.assign(locations=pd.NA)
+    out = g.agg(
+        **{c: (c, "first") for c in LOT_MUST_AGREE},
+        quantity=("quantity", "sum"),
+        local_mv=("local_mv", "sum"),
+        base_mv=("base_mv", "sum"),
+        lots=("isin", "size"),
+        locations=("locations", lambda s: "+".join(s.dropna().astype(str)) or pd.NA),
+    ).reset_index()
+    split = out[out["lots"] > 1]
+    if len(split):
+        log.info("%s: %d holding(s) reported across multiple locations: %s", where,
+                 len(split), ", ".join(split["fund_code"] + "/" + split["ticker"]))
+    return out
 
 
 # --------------------------------------------------------------- accounting

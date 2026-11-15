@@ -42,7 +42,9 @@ def reconcile(custodian: pd.DataFrame, accounting: pd.DataFrame,
     cfg = cfg or load_yaml("recon.yaml")
     tol, ca = cfg["tolerances"], cfg["corporate_action"]
 
-    c = custodian[KEY + COMPARE].rename(columns={k: f"{k}_cust" for k in COMPARE})
+    extra = ["locations"] if "locations" in custodian else []
+    c = custodian[KEY + COMPARE + extra].rename(
+        columns={k: f"{k}_cust" for k in COMPARE} | {"locations": "custodian_locations"})
     a = accounting[KEY + COMPARE].rename(columns={k: f"{k}_acct" for k in COMPARE})
     m = c.merge(a, on=KEY, how="outer", indicator=True, validate="one_to_one")
 
@@ -89,7 +91,8 @@ def reconcile(custodian: pd.DataFrame, accounting: pd.DataFrame,
         breaks["abs_base_mv_diff"], [-1, bands["medium"], bands["high"], float("inf")],
         labels=["Low", "Medium", "High"]).astype(str)
     breaks = breaks.sort_values(["abs_base_mv_diff"], ascending=False)
-    return breaks[BREAK_COLUMNS].reset_index(drop=True)
+    cols = BREAK_COLUMNS + (["custodian_locations"] if extra else [])
+    return breaks[cols].reset_index(drop=True)
 
 
 def _cause(r: pd.Series) -> str:
