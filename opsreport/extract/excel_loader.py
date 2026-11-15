@@ -279,6 +279,59 @@ def load_fx(as_of: date, path: Path | None = None) -> pd.Series:
     return rates
 
 
+# ------------------------------------------------------------ pending trades
+PENDING_COLUMNS = ["trade_id", "fund_code", "isin", "ticker", "side", "quantity",
+                   "signed_quantity", "trade_date", "settle_date"]
+
+
+def load_pending(as_of: date, path: Path | None = None) -> pd.DataFrame:
+    """Open trades: booked in fund accounting, not yet received by the custodian.
+
+    `signed_quantity` is + for a buy and - for a sell, the amount by which
+    accounting is expected to be above the custodian until settlement.
+    """
+    cfg = load_yaml("excel_layouts.yaml")["pending_trades"]
+    path = path or source_path("pending_trades", as_of)
+    cols = cfg["columns"]
+    raw = pd.read_excel(path, sheet_name=cfg["sheet"], dtype=object)
+    df = _select_columns(raw, cols, path.name)
+    if df.empty:
+        return pd.DataFrame(columns=PENDING_COLUMNS)
+    for col in ("trade_id", "fund_code", "isin", "ticker", "side"):
+        df[col] = df[col].astype("string").str.strip()
+    df["isin"] = df["isin"].str.upper()
+    df["side"] = df["side"].str.title()
+
+    def fail(problem: str, rows: pd.DataFrame) -> None:
+        if len(rows):
+            raise SourceFileError(f"{path.name}: {problem} for trade(s) "
+                                  f"{rows['trade_id'].astype(str).tolist()[:5]}")
+
+    def dates(col: str) -> pd.Series:
+        out = pd.to_datetime(df[col], errors="coerce")
+        fail(f"'{cols[col]}' is blank or not a date", df[out.isna()])
+        return out.dt.date
+
+    report = dates("report_date").unique()
+    if len(report) != 1 or report[0] != as_of:
+        raise SourceFileError(f"{path.name}: report dates {list(report)}, expected {as_of}")
+    df["trade_date"], df["settle_date"] = dates("trade_date"), dates("settle_date")
+    df["quantity"] = to_number(df["quantity"], path.name, cols["quantity"])
+    fail(f"'{cols['side']}' must be Buy or Sell", df[~df["side"].isin(["Buy", "Sell"])])
+    fail(f"'{cols['quantity']}' must be a positive number",
+         df[df["quantity"].isna() | (df["quantity"] <= 0)])
+    fail(f"'{cols['trade_date']}' is after the report date", df[df["trade_date"] > as_of])
+    fail(f"'{cols['settle_date']}' is before the trade date",
+         df[df["settle_date"] < df["trade_date"]])
+    fail("trade id repeated", df[df["trade_id"].duplicated(keep=False)])
+    known = {f["code"] for f in load_yaml("funds.yaml")["funds"]}
+    fail("unknown fund code", df[~df["fund_code"].isin(known)])
+
+    df["signed_quantity"] = df["quantity"].where(df["side"].eq("Buy"), -df["quantity"])
+    log.info("Pending trades %s: %d open", as_of, len(df))
+    return df[PENDING_COLUMNS]
+
+
 class Sources(TypedDict):
     """One week's inputs: two position tables and the official FX rates."""
     custodian: pd.DataFrame

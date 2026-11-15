@@ -60,7 +60,7 @@ def _kind(col: str) -> str:
         return "money"
     if c.startswith(("quantity", "price", "fx_rate")):
         return "num"
-    if "date" in c or c in ("week_ending", "as_of"):
+    if "date" in c or c.endswith(("_seen", "_due")) or c in ("week_ending", "as_of"):
         return "date"
     return "text"
 
