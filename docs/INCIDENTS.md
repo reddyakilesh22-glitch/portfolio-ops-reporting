@@ -83,3 +83,28 @@ calendar are rejected. A run date that isn't a business day is flagged.
 **Verified:** 11/13 report unchanged (no holidays in its window); 11/27 ages correct.
 **Follow-up:** Jira `duedate` is set upstream by Jira automation and may have the
 same blind spot; raise with the Jira admin.
+
+---
+
+## Code audit, 2026-11-15
+
+A deliberate review of the whole codebase, looking for bugs, security issues and
+weak spots. 19 findings, each reproduced before fixing, each fix with a
+regression test that failed first.
+
+| Group | Findings | Most important | Fix |
+|---|---|---|---|
+| Wrong numbers, no error | 9 | A blank custodian quantity was loaded as 0, and a duplicated statement row was summed as a second lot. Both were **regressions introduced by INC-002's fix** | #11, PR #12 |
+| Security | 3 | Text from Jira or vendor files starting with `=` became a live Excel formula (formula injection) | #13, PR #14 |
+| Crashes | 5 | No network, an empty Jira project, or `--allow-errors` itself ended in a raw traceback | #15, PR #16 |
+| AI fact-checker | 1 (4 cases) | "AUM rose" when it fell, swapped fund figures, invented causes all passed | #17, PR #18 |
+| Tooling | 4 | Tests read a file a live run may replace; no type checking or coverage in CI | #19 |
+
+**Lessons:**
+
+- A fix can introduce the next bug. INC-002's lot aggregation used `sum()`, which
+  treats a blank as zero, quietly bypassing the check that would have caught it.
+- The tests had covered what the code was designed to do, not what it might do
+  wrong. Each audit finding is now a test.
+- Re-reading "verified" AI output by hand found misleading sentences the
+  checker had passed. Automated checks reduce review; they don't replace it.

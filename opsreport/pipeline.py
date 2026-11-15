@@ -169,11 +169,12 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
         # fund/ISIN and drop rows without a key, so nothing is double-counted.
         def usable(df: pd.DataFrame) -> pd.DataFrame:
             return df.dropna(subset=RECON_KEY).drop_duplicates(RECON_KEY)
-        cur = {**cur, "custodian": usable(cur["custodian"]),
-               "accounting": usable(cur["accounting"])}
+        cur = excel_loader.Sources(custodian=usable(cur["custodian"]),
+                                   accounting=usable(cur["accounting"]), fx=cur["fx"])
         if prev:
-            prev = {**prev, "custodian": usable(prev["custodian"]),
-                    "accounting": usable(prev["accounting"])}
+            prev = excel_loader.Sources(custodian=usable(prev["custodian"]),
+                                        accounting=usable(prev["accounting"]),
+                                        fx=prev["fx"])
         forced = Issue(WARNING, "run", "forced_run",
                        f"Report forced with --allow-errors despite {n_err} data-quality "
                        "error(s); duplicate or keyless positions were ignored. "

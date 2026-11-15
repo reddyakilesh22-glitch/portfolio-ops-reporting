@@ -17,7 +17,7 @@ from opsreport.validate.checks import ERROR, check_jira, check_positions
 
 AS_OF, PRIOR = date(2026, 11, 13), date(2026, 11, 6)
 CUST = ROOT / "data/raw/2026-11-13/custodian_holdings_20261113.xlsx"
-SNAP = ROOT / "data/snapshots/jira_2026-11-13.json"
+SNAP = ROOT / "tests/fixtures/snapshots/jira_2026-11-13.json"
 
 
 def edit_custodian(tmp_path, fn):

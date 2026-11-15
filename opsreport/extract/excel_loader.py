@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime
 from pathlib import Path
+from typing import TypedDict
 
 import pandas as pd
 
@@ -46,7 +47,8 @@ def to_number(series: pd.Series, where: str = "", column: str = "") -> pd.Series
         return series.astype(float)
     s = series.astype("string").str.strip()
     negative = s.str.match(r"^\(.*\)$", na=False)
-    s = s.str.replace(r"[,\s()$]", "", regex=True).replace({"": None, "-": None})
+    s = s.str.replace(r"[,\s()$]", "", regex=True)
+    s = s.mask(s.isin(["", "-"]))
     out = pd.to_numeric(s, errors="coerce").astype(float)
     bad = series[out.isna() & s.notna()]
     if len(bad):
@@ -200,12 +202,12 @@ def aggregate_lots(rows: pd.DataFrame, where: str = "custodian") -> pd.DataFrame
     g = rows.groupby(LOT_KEYS, sort=False, dropna=False)
     disagree = [c for c in LOT_MUST_AGREE if (g[c].nunique(dropna=False) > 1).any()]
     if disagree:
-        bad = g[disagree].nunique(dropna=False)
-        bad = bad[(bad > 1).any(axis=1)].index.tolist()
+        counts = g[disagree].nunique(dropna=False)
+        bad = counts[(counts > 1).any(axis=1)].index.tolist()
         raise SourceFileError(f"{where}: lots of the same holding disagree on {disagree} "
                               f"for {bad[:5]}")
     if "locations" not in rows:
-        rows = rows.assign(locations=pd.NA)
+        rows = rows.assign(locations=pd.Series(pd.NA, index=rows.index, dtype="string"))
     rows = rows.assign(
         _dup=rows.duplicated([*LOT_KEYS, "locations"], keep=False))  # NaN == NaN here
     g = rows.groupby(LOT_KEYS, sort=False, dropna=False)
@@ -277,10 +279,17 @@ def load_fx(as_of: date, path: Path | None = None) -> pd.Series:
     return rates
 
 
-def load_all(as_of: date, raw_dir: Path = RAW_DIR) -> dict[str, pd.DataFrame | pd.Series]:
+class Sources(TypedDict):
+    """One week's inputs: two position tables and the official FX rates."""
+    custodian: pd.DataFrame
+    accounting: pd.DataFrame
+    fx: pd.Series
+
+
+def load_all(as_of: date, raw_dir: Path = RAW_DIR) -> Sources:
     """Load the three workbooks for `as_of` from `raw_dir/<as_of>/`."""
-    return {
-        "custodian": load_custodian(as_of, source_path("custodian", as_of, raw_dir)),
-        "accounting": load_accounting(as_of, source_path("accounting", as_of, raw_dir)),
-        "fx": load_fx(as_of, source_path("fx", as_of, raw_dir)),
-    }
+    return Sources(
+        custodian=load_custodian(as_of, source_path("custodian", as_of, raw_dir)),
+        accounting=load_accounting(as_of, source_path("accounting", as_of, raw_dir)),
+        fx=load_fx(as_of, source_path("fx", as_of, raw_dir)),
+    )

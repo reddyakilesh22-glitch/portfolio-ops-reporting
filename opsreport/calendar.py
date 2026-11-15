@@ -51,7 +51,7 @@ def busday_count(start: pd.Series, end: date) -> pd.Series:
     """
     if start.empty:
         return pd.Series(dtype="int64", index=start.index)
-    s = pd.to_datetime(start).values.astype("datetime64[D]")
+    s = np.asarray(pd.to_datetime(start), dtype="datetime64[D]")
     require_coverage(end, end)
     counts = np.busday_count(s, np.datetime64(end), holidays=holidays())
     return pd.Series(counts, index=start.index)

@@ -17,7 +17,7 @@ from opsreport.extract.jira_client import JiraClient, JiraError, load_snapshot
 
 AS_OF, PRIOR = date(2026, 11, 13), date(2026, 11, 6)
 BASE = "https://x.atlassian.net"
-SNAP = ROOT / "data/snapshots/jira_2026-11-13.json"
+SNAP = ROOT / "tests/fixtures/snapshots/jira_2026-11-13.json"
 CUST = ROOT / "data/raw/2026-11-13/custodian_holdings_20261113.xlsx"
 
 

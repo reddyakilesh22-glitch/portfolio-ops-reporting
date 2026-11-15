@@ -176,8 +176,8 @@ docs/             the documents listed below
 ## Built with
 
 Python 3.11, pandas, openpyxl and XlsxWriter (Excel), requests (Jira REST
-API), pytest and ruff, GitHub Actions for CI, and optionally Ollama for a
-local language model.
+API), pytest, ruff and mypy, GitHub Actions for CI (lint, types, tests, coverage
+floor), and optionally Ollama for a local language model.
 
 ## Limits
 
