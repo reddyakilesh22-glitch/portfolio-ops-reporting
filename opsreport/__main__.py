@@ -12,7 +12,15 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from opsreport.config import ConfigError
+from opsreport.extract.excel_loader import SourceFileError
+from opsreport.extract.jira_client import JiraError
 from opsreport.pipeline import OUTPUT_DIR, DataQualityError, run
+
+# Failures with a clear cause and a runbook entry: one line on the console.
+# Anything else is a bug and keeps its full traceback.
+KNOWN_FAILURES = (SourceFileError, JiraError, ConfigError, FileNotFoundError)
+_trace = logging.getLogger("opsreport.trace")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,17 +40,28 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     args.out.mkdir(parents=True, exist_ok=True)
-    handlers = [logging.StreamHandler(sys.stderr),
-                logging.FileHandler(args.out / "run.log", encoding="utf-8")]
+    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    file_handler = logging.FileHandler(args.out / "run.log", encoding="utf-8")
+    file_handler.setFormatter(fmt)
+    console = logging.StreamHandler(sys.stderr)
+    console.setFormatter(fmt)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-                        handlers=handlers)
+                        handlers=[console, file_handler], force=True)
+    _trace.handlers = [file_handler]  # tracebacks go to run.log only
+    _trace.propagate = False
+    log = logging.getLogger("opsreport")
     try:
         res = run(args.as_of, args.prior, args.jira, args.snapshot, args.out,
                   args.allow_errors)
     except DataQualityError as exc:
-        logging.getLogger("opsreport").error("%s", exc)
+        log.error("%s", exc)
         return 2
+    except KNOWN_FAILURES as exc:
+        log.error("%s: %s", type(exc).__name__, exc)
+        _trace.error("Traceback for the error above", exc_info=True)
+        log.error("Run failed; see docs/RUNBOOK.md section 3 (traceback in %s)",
+                  args.out / "run.log")
+        return 1
     print(f"\nReport: {res.report_path}\nBreaks: {len(res.breaks)} | "
           f"DQ issues: {len(res.issues)}")
     return 0

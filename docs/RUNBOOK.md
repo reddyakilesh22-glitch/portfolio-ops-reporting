@@ -50,14 +50,17 @@ If a re-run gives different numbers than were published, compare the
 
 ## 3. Troubleshooting
 
-Read the **last ERROR line** in `output/run.log`; messages name the file,
-sheet, and record.
+Read the **ERROR lines** on the console (also in `output/run.log`); messages name
+the file, sheet, and record. Known failures print one line and exit 1; the full
+traceback is in `run.log` if you need it. A raw traceback on the console means an
+unexpected error (a bug): open an issue with the log attached.
 
 | Message contains | Likely cause | Action |
 |---|---|---|
 | `file not found` | Upstream file late or misnamed | Check the drop location; do not rename someone else's file without confirming it is the right date |
 | `statement is as of X, expected Y` / `position dates` / `rate dates` | Wrong day's file delivered | Request the correct file. Never edit dates inside a source file |
 | `expected column(s) [...] not found` | Vendor renamed a column | Confirm the meaning is unchanged with the vendor, then update `config/excel_layouts.yaml` |
+| `can't read statement date` | Custodian changed the date format | If the date is unambiguous, add the format to `as_of_formats`; never add a day-first format alongside `%m/%d/%Y` |
 | `no header row containing 'ISIN'` | Layout change or wrong file | Open the file; check it is the holdings statement |
 | `unknown account sheet(s)` | New fund/account at custodian | Add it to `config/funds.yaml` once the fund code is confirmed |
 | `lots of the same holding disagree on [...]` | Custodian reports one holding at several depositories with different prices/FX | Genuine data issue at the custodian: raise with them; do not pick one lot |

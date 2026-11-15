@@ -9,6 +9,7 @@
 |---|---|---|---|---|---|
 | INC-001 | 2026-11-15 | Jira extract | Run stopped: `no Jira field named ['Break Amount (USD)']` | Admin renamed the custom field; resolver matched by name only | Pin field ids per site; follow renames by id with a DQ warning (#1) |
 | INC-002 | 2026-11-15 | Custodian file | Re-run for 11/13 exited 2 with 9 `duplicate_position` errors | Custodian re-issued statement in v2 format, splitting holdings by depository; we assumed one row per position | Aggregate custodian lots to fund/ISIN with consistency checks (#3) |
+| INC-003 | 2026-11-15 | Custodian file / CLI | Run crashed with a 25-line traceback: `time data '11/13/2026' does not match format '%d-%b-%Y'` | One hardcoded date format; parse error escaped as a raw `ValueError` | Configured unambiguous formats; clean one-line errors, traceback to run.log (#5) |
 
 ---
 
@@ -48,3 +49,20 @@ statement; answer-key test passes on the v2 file.
 wrong reason after the new column shifted positions; it now finds the header by
 name and asserts the exact missing column. And the report writer didn't handle
 pandas `NA` values; fixed.
+
+## INC-003: statement date format change (issue #5)
+
+**Detected:** run exited 1 with a standard-library traceback; the message didn't
+say which file or sheet, so the runbook couldn't be followed.
+**Root cause:** the preamble date was parsed with one hardcoded format, and the
+`ValueError` was never translated into our `SourceFileError`. More broadly, every
+known failure type printed a full traceback on the console.
+**Fix:** `as_of_formats` list in `config/excel_layouts.yaml` (kept unambiguous: a
+test fails if both `%m/%d/%Y` and `%d/%m/%Y` are configured, since 11/12 would
+silently become the wrong date). Parse failures name file, sheet, text and formats
+tried. The CLI prints one ERROR line for known failures (`SourceFileError`,
+`JiraError`, `ConfigError`, `FileNotFoundError`), points to the runbook, exits 1,
+and writes the traceback to `run.log`. Unexpected exceptions keep their traceback
+because they are bugs.
+**Verified:** US-format date: run completes, 11 breaks. Unknown format: one clear
+line, exit 1, traceback in `run.log`.

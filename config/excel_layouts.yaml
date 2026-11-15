@@ -7,7 +7,9 @@ custodian:
   header_marker: ISIN          # header row = first row containing this cell
   max_header_scan_rows: 20
   as_of_prefix: "As of:"
-  as_of_format: "%d-%b-%Y"
+  # Tried in order. Keep these unambiguous: never list both %m/%d/%Y and
+  # %d/%m/%Y, or 11/12/2026 silently becomes the wrong date.
+  as_of_formats: ["%d-%b-%Y", "%m/%d/%Y", "%Y-%m-%d", "%d %B %Y"]
   total_label: Total           # statement control total row
   columns:
     account: Account
