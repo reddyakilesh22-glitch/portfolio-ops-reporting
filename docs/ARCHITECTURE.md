@@ -201,7 +201,17 @@ each number in the draft; on failure it retries once, then uses a fixed template
 | `test_cli.py` | Exit codes and clean error messages |
 | `test_ai_commentary.py` | The fact-checker rejects wrong drafts and accepts correct ones |
 
-CI (GitHub Actions) runs the linter and all tests on every push and pull request.
+Tests read a frozen copy of the Jira snapshot (`tests/fixtures/snapshots/`), so
+replacing the real one with a fresh pull can't change test results.
+
+CI (GitHub Actions) runs on every push and pull request:
+
+| Step | Tool | Fails when |
+|---|---|---|
+| Lint | ruff | Style or likely-bug patterns |
+| Types | mypy | A value is used as the wrong type (e.g. FX rates passed where positions are expected) |
+| Tests | pytest | Any test fails |
+| Coverage | pytest-cov | Less than 90% of `opsreport/` is exercised by tests (currently about 97%) |
 
 ## Design choices worth knowing
 

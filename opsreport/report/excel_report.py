@@ -290,15 +290,15 @@ def _sla(w: _Writer, d: ReportData) -> None:
     ws.merge_range(row, 0, row, 7, "By team", w.f["h2"])
     ws.set_column(0, 7, 15)
     ws.set_column(0, 0, 20)
-    row = w.table(ws, d.jira_by_team, row + 1, widths={c: 15 for c in d.jira_by_team}
-                  | {"ops_team": 20})
+    row = w.table(ws, d.jira_by_team, row + 1,
+                  widths={str(c): 15 for c in d.jira_by_team} | {"ops_team": 20})
     ws.merge_range(row, 0, row, 7, "Open ticket aging (business days)", w.f["h2"])
-    row = w.table(ws, d.jira_aging, row + 1, widths={c: 15 for c in d.jira_aging}
-                  | {"ops_team": 20})
+    row = w.table(ws, d.jira_aging, row + 1,
+                  widths={str(c): 15 for c in d.jira_aging} | {"ops_team": 20})
     ws.merge_range(row, 0, row, 7, "Weekly trend", w.f["h2"])
     trend_row = row + 1
-    row = w.table(ws, d.jira_trend, trend_row, widths={c: 15 for c in d.jira_trend}
-                  | {"week_ending": 20})
+    row = w.table(ws, d.jira_trend, trend_row,
+                  widths={str(c): 15 for c in d.jira_trend} | {"week_ending": 20})
 
     n = len(d.jira_trend)
     chart = w.wb.add_chart({"type": "column"})

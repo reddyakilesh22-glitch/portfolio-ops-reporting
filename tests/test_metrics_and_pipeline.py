@@ -65,7 +65,7 @@ def test_trend_open_count_matches_kpis(tickets):
 
 
 def test_jira_checks_find_planted_issues():
-    df = snapshot_to_frame(load_snapshot(ROOT / "data/snapshots/jira_2026-11-13.json"))
+    df = snapshot_to_frame(load_snapshot(ROOT / "tests/fixtures/snapshots/jira_2026-11-13.json"))
     checks = pd.Series([i.check for i in check_jira(df)]).value_counts().to_dict()
     assert checks == {"required_field": 4, "done_without_resolved_date": 2}
 

@@ -2,3 +2,8 @@
 pytest==9.2.0
 responses==0.26.3
 ruff==0.17.5
+pytest-cov==7.1.0
+mypy==2.4.1
+pandas-stubs==3.1.0.261029
+types-PyYAML==6.0.12.20261113
+types-requests==2.33.0.20261030

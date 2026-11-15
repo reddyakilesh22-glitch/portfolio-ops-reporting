@@ -117,7 +117,7 @@ def check_jira(df: pd.DataFrame) -> list[Issue]:
             out.append(Issue(WARNING, "jira", "required_field",
                              f"{cfg[col]['name']} is blank; excluded from fund-level "
                              "metrics" if col == "fund" else f"{cfg[col]['name']} is blank",
-                             row.key))
+                             str(row.key)))
 
     for col in ("fund", "ops_team", "break_type"):
         allowed = set(cfg[col]["options"])
@@ -125,27 +125,27 @@ def check_jira(df: pd.DataFrame) -> list[Issue]:
         for row in bad.itertuples():
             out.append(Issue(WARNING, "jira", "unexpected_option",
                              f"{cfg[col]['name']} '{getattr(row, col)}' not in config",
-                             row.key))
+                             str(row.key)))
 
     for row in df[df["due_date"].isna()].itertuples():
         out.append(Issue(WARNING, "jira", "due_date_blank",
-                         "Due date blank; excluded from SLA and overdue counts", row.key))
+                         "Due date blank; excluded from SLA and overdue counts", str(row.key)))
 
     done = df["status_category"].eq("done")
     for row in df[done & df["resolved_business_date"].isna()].itertuples():
         out.append(Issue(WARNING, "jira", "done_without_resolved_date",
                          "status Done but Resolved Business Date blank; excluded "
-                         "from SLA calculations", row.key))
+                         "from SLA calculations", str(row.key)))
     for row in df[~done & df["resolved_business_date"].notna()].itertuples():
         out.append(Issue(WARNING, "jira", "open_with_resolved_date",
-                         f"status {row.status} but Resolved Business Date set", row.key))
+                         f"status {row.status} but Resolved Business Date set", str(row.key)))
 
     both = df["resolved_business_date"].notna() & df["business_date"].notna()
     early = df[both & (df["resolved_business_date"] < df["business_date"])]
     for row in early.itertuples():
         out.append(Issue(WARNING, "jira", "resolved_before_raised",
-                         "Resolved Business Date is before Business Date", row.key))
+                         "Resolved Business Date is before Business Date", str(row.key)))
 
     for row in df[df["key"].duplicated()].itertuples():
-        out.append(Issue(ERROR, "jira", "duplicate_key", "issue key repeated", row.key))
+        out.append(Issue(ERROR, "jira", "duplicate_key", "issue key repeated", str(row.key)))
     return out
