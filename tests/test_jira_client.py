@@ -21,7 +21,7 @@ FIELDS = [
     {"id": "customfield_1", "name": "Fund", "custom": True},
     {"id": "customfield_2", "name": "Ops Team", "custom": True},
     {"id": "customfield_3", "name": "Break Type", "custom": True},
-    {"id": "customfield_4", "name": "Break Amount (USD)", "custom": True},
+    {"id": "customfield_4", "name": "Break Amount USD", "custom": True},
     {"id": "customfield_5", "name": "Business Date", "custom": True},
     {"id": "customfield_6", "name": "Resolved Business Date", "custom": True},
 ]
@@ -134,3 +134,69 @@ def test_extract_end_to_end(client):
     df = extract_ops_tickets(client)
     assert len(df) == 2
     assert {"fund", "ops_team", "break_amount_usd", "business_date"} <= set(df.columns)
+
+
+# ---- INC-001: renamed custom field (issue #1) --------------------------------
+def _typed(fields):
+    types = {"customfield_4": "float"}
+    return [{**f, "schema": {"custom": "cf:" + types.get(f["id"], "select")}}
+            for f in fields]
+
+
+def _lock(client, **overrides):
+    pins = {"fund": "customfield_1", "ops_team": "customfield_2",
+            "break_type": "customfield_3", "break_amount_usd": "customfield_4",
+            "business_date": "customfield_5", "resolved_business_date": "customfield_6"}
+    fields = {k: {"id": v, "name": "x", "type": "cf:float" if v == "customfield_4"
+                  else "cf:select"} for k, v in pins.items()}
+    return {"site_fingerprint": client.site_fingerprint(), "fields": fields, **overrides}
+
+
+def _renamed(old, new, fields=FIELDS):
+    return _typed([{**f, "name": new} if f["name"] == old else f for f in fields])
+
+
+@responses.activate
+def test_renamed_field_followed_by_pinned_id_with_warning(client):
+    responses.get(f"{BASE}/rest/api/3/field",
+                  json=_renamed("Break Amount USD", "Break Amt (USD)"))
+    ids = client.resolve_custom_fields(lock=_lock(client))
+    assert ids["break_amount_usd"] == "customfield_4"
+    assert len(client.field_warnings) == 1
+    assert "renamed to 'Break Amt (USD)'" in client.field_warnings[0]
+
+
+@responses.activate
+def test_deleted_field_still_fails(client):
+    gone = [f for f in _typed(FIELDS) if f["id"] != "customfield_4"]
+    responses.get(f"{BASE}/rest/api/3/field", json=gone)
+    with pytest.raises(FieldMappingError, match="pinned id customfield_4 is gone"):
+        client.resolve_custom_fields(lock=_lock(client))
+
+
+@responses.activate
+def test_pinned_id_with_changed_type_fails(client):
+    retyped = [{**f, "schema": {"custom": "cf:textfield"}} if f["id"] == "customfield_4"
+               else f for f in _renamed("Break Amount USD", "Notes")]
+    responses.get(f"{BASE}/rest/api/3/field", json=retyped)
+    with pytest.raises(FieldMappingError, match="changed type"):
+        client.resolve_custom_fields(lock=_lock(client))
+
+
+@responses.activate
+def test_old_name_reused_by_new_field_fails(client):
+    # Admin renamed field 4 and created a *new* field with the old name.
+    fields = _renamed("Break Amount USD", "Break Amt (USD)") + [
+        {"id": "customfield_99", "name": "Break Amount USD", "custom": True,
+         "schema": {"custom": "cf:float"}}]
+    responses.get(f"{BASE}/rest/api/3/field", json=fields)
+    with pytest.raises(FieldMappingError, match="lock pins customfield_4"):
+        client.resolve_custom_fields(lock=_lock(client))
+
+
+@responses.activate
+def test_lock_from_another_site_is_ignored(client):
+    responses.get(f"{BASE}/rest/api/3/field",
+                  json=_renamed("Break Amount USD", "Break Amt (USD)"))
+    with pytest.raises(FieldMappingError):
+        client.resolve_custom_fields(lock=_lock(client, site_fingerprint="other"))

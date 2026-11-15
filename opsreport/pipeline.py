@@ -25,7 +25,14 @@ from opsreport.reconcile.positions import reconcile, summarize
 from opsreport.report.excel_report import ReportData, write_report
 from opsreport.transform import aum as aum_mod
 from opsreport.transform import jira_metrics as jm
-from opsreport.validate.checks import ERROR, check_jira, check_positions, issues_frame
+from opsreport.validate.checks import (
+    ERROR,
+    WARNING,
+    Issue,
+    check_jira,
+    check_positions,
+    issues_frame,
+)
 
 log = logging.getLogger("opsreport")
 SNAPSHOT_DIR = ROOT / "data" / "snapshots"
@@ -100,8 +107,11 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
     tickets = snapshot_to_frame(snap)
 
     # ---- validate
+    field_issues = [Issue(WARNING, "jira", "field_renamed", w)
+                    for w in snap.get("field_warnings", [])]
     issues = issues_frame(
-        check_positions(cur["custodian"], cur["fx"])
+        field_issues
+        + check_positions(cur["custodian"], cur["fx"])
         + check_positions(cur["accounting"], cur["fx"])
         + check_jira(tickets))
     n_err = int((issues["severity"] == ERROR).sum())

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 
 from opsreport.config import load_yaml
-from opsreport.extract.jira_client import JiraClient, JiraError
+from opsreport.extract.jira_client import JiraClient, JiraError, save_field_lock
 
 log = logging.getLogger("jira_setup")
 
@@ -123,8 +123,10 @@ def main() -> None:
     field_ids = [ensure_field(jira, spec, existing) for spec in cfg["custom_fields"].values()]
     ensure_on_screens(jira, field_ids + EXTRA_SCREEN_FIELDS)
 
-    resolved = jira.resolve_custom_fields(cfg)
-    log.info("Setup complete. Field mapping: %s", resolved)
+    resolved = jira.resolve_custom_fields(cfg, lock=None)
+    save_field_lock(jira.build_field_lock(resolved))
+    log.info("Setup complete. Field mapping pinned in config/jira_field_lock.yaml: %s",
+             resolved)
 
 
 if __name__ == "__main__":

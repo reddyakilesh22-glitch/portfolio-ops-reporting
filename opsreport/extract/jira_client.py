@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -19,8 +20,9 @@ from typing import Any
 
 import pandas as pd
 import requests
+import yaml
 
-from opsreport.config import JiraSettings, load_jira_settings, load_yaml
+from opsreport.config import CONFIG_DIR, JiraSettings, load_jira_settings, load_yaml
 
 log = logging.getLogger(__name__)
 
@@ -84,35 +86,80 @@ class JiraClient:
     def all_fields(self) -> list[dict]:
         return self.get("/rest/api/3/field")
 
-    def resolve_custom_fields(self, field_config: dict | None = None) -> dict[str, str]:
+    def site_fingerprint(self) -> str:
+        """Stable id for this Jira site without storing its URL."""
+        return hashlib.sha256(self.base_url.lower().encode()).hexdigest()[:16]
+
+    def resolve_custom_fields(self, field_config: dict | None = None,
+                              lock: dict | None | bool = True) -> dict[str, str]:
         """Map logical names (e.g. 'fund') to Jira ids (e.g. 'customfield_10042').
 
-        Raises FieldMappingError listing every field it could not find, rather
-        than silently returning empty columns.
+        Resolution is by display name (portable across Jira sites). If a name is
+        missing but the id pinned in config/jira_field_lock.yaml for *this* site
+        still exists with the same type, the field was renamed: follow the id
+        and record a warning in `self.field_warnings`.
+
+        Raises FieldMappingError listing every field it could not resolve.
         """
         cfg = field_config or load_yaml("jira_fields.yaml")
+        if lock is True:
+            lock = load_field_lock()
+        if lock and lock.get("site_fingerprint") != self.site_fingerprint():
+            log.warning("Field lock is for a different Jira site; ignoring it")
+            lock = None
+        pinned = (lock or {}).get("fields", {})
+
         aliases = cfg.get("aliases") or {}
         by_name: dict[str, list[str]] = {}
+        by_id: dict[str, dict] = {}
         for f in self.all_fields():
             if f.get("custom"):
                 by_name.setdefault(f["name"], []).append(f["id"])
+                by_id[f["id"]] = f
 
+        self.field_warnings: list[str] = []
         resolved, problems = {}, []
         for logical, spec in cfg["custom_fields"].items():
             candidates = [spec["name"], *aliases.get(logical, [])]
             hits = [(n, by_name[n]) for n in candidates if n in by_name]
-            if not hits:
-                problems.append(f"{logical}: no Jira field named {candidates}")
-            elif len(hits[0][1]) > 1:
-                problems.append(f"{logical}: '{hits[0][0]}' is ambiguous {hits[0][1]}")
+            pin = pinned.get(logical)
+            if hits:
+                name, ids = hits[0]
+                if len(ids) > 1:
+                    problems.append(f"{logical}: '{name}' is ambiguous {ids}")
+                elif pin and pin["id"] != ids[0]:
+                    problems.append(
+                        f"{logical}: '{name}' is now {ids[0]} but the lock pins "
+                        f"{pin['id']}; a new field may have taken the old name")
+                else:
+                    resolved[logical] = ids[0]
+                continue
+            current = by_id.get(pin["id"]) if pin else None
+            if current and _schema_type(current) == pin.get("type"):
+                resolved[logical] = pin["id"]
+                msg = (f"Jira field '{spec['name']}' was renamed to '{current['name']}' "
+                       f"({pin['id']}); followed by id. Update config/jira_fields.yaml.")
+                self.field_warnings.append(msg)
+                log.warning(msg)
             else:
-                resolved[logical] = hits[0][1][0]
+                problems.append(f"{logical}: no Jira field named {candidates}"
+                                + (f" and pinned id {pin['id']} is gone or changed type"
+                                   if pin else ""))
         if problems:
             raise FieldMappingError(
                 "Custom field mapping failed (check config/jira_fields.yaml):\n  "
                 + "\n  ".join(problems)
             )
         return resolved
+
+    def build_field_lock(self, field_ids: dict[str, str]) -> dict:
+        by_id = {f["id"]: f for f in self.all_fields()}
+        return {
+            "site_fingerprint": self.site_fingerprint(),
+            "fields": {k: {"id": v, "name": by_id[v]["name"],
+                           "type": _schema_type(by_id[v])}
+                       for k, v in field_ids.items()},
+        }
 
     # ---------------------------------------------------------------- search
     def search(
@@ -129,6 +176,26 @@ class JiraClient:
             token = page.get("nextPageToken")
             if page.get("isLast", True) or not token:
                 return
+
+
+FIELD_LOCK = CONFIG_DIR / "jira_field_lock.yaml"
+
+
+def _schema_type(field: dict) -> str | None:
+    return (field.get("schema") or {}).get("custom")
+
+
+def load_field_lock(path: Path = FIELD_LOCK) -> dict | None:
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def save_field_lock(lock: dict, path: Path = FIELD_LOCK) -> None:
+    header = ("# Jira custom field ids pinned per site (written by scripts/jira_setup.py).\n"
+              "# Lets a renamed field be followed by id instead of stopping the run.\n")
+    path.write_text(header + yaml.safe_dump(lock, sort_keys=False), encoding="utf-8")
 
 
 # ----------------------------------------------------------------- flatten
@@ -195,6 +262,7 @@ def fetch_snapshot(client: JiraClient | None = None, jql: str | None = None) -> 
         "extracted_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "jql": jql,
         "field_ids": field_ids,
+        "field_warnings": client.field_warnings,
         "issues": issues,
     }
 

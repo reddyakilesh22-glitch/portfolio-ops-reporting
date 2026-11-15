@@ -36,7 +36,7 @@ custom_fields:
       - FX Rate
       - Static Data
   break_amount_usd:
-    name: Break Amount (USD)
+    name: Break Amount USD
     type: number
   business_date:
     name: Business Date
