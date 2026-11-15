@@ -75,9 +75,13 @@ unexpected error (a bug): open an issue with the log attached.
 | `loaded base MV ... != statement total` | Rows dropped or mis-parsed | Look for rows with a blank or changed Account value; do not loosen the tolerance |
 | `missing or non-positive rates` / `unknown_currency` | FX file incomplete | Request a corrected FX file. Do not substitute a rate yourself |
 | `Custom field mapping failed` | Jira field renamed/deleted | See Incident INC-001 in `docs/INCIDENTS.md` |
+| `has N non-numeric value(s): 'TBC'` | Text where a number belongs in a source file | Ask the provider for the value; do not type a number into their file |
+| `Jira ... network error after N attempt(s)` | No connection, VPN down, or Jira unreachable | Check the connection and re-run; or run without `--jira live` to use the saved snapshot |
+| `calendar_gap` (DQ warning) | An open ticket was raised in a year missing from the holiday calendar | Add that year to `config/calendar.yaml`; until then that ticket's age is slightly overstated |
+| `forced_run` (DQ warning) | Report was produced with `--allow-errors` | For investigation only; say so if it is shared |
 | `Jira ... 401` | API token expired or revoked | Create a new token, update `.env`, never paste it in chat or tickets |
 | `Jira ... 429` (repeated) | Rate limiting | The client retries automatically; if it still fails, re-run later |
-| `Holiday calendar ... has no entries for [YYYY]` | New year not added to the calendar | Add the exchange's published closures to `config/calendar.yaml` (PR) |
+| `Holiday calendar ... has no entries for [YYYY]` | The report date's own year is not in the calendar | Add the exchange's published closures to `config/calendar.yaml` (PR) |
 | `A Jira snapshot for <date> already exists` | `--jira live` used for a week that already has a saved pull | Re-run without `--jira live`; add `--refresh-snapshot` only to replace it on purpose |
 | `duplicate_lot` (DQ error) | The custodian statement lists the same fund, security and location twice | Ask the custodian for a corrected statement; do not delete the row yourself |
 | `No Jira snapshot on/after` | Running offline for a week with no snapshot | Run with `--jira live` |

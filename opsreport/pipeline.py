@@ -24,6 +24,7 @@ from opsreport.extract.jira_client import (
     save_snapshot,
     snapshot_to_frame,
 )
+from opsreport.reconcile.positions import KEY as RECON_KEY
 from opsreport.reconcile.positions import reconcile, summarize
 from opsreport.report.excel_report import (
     ReportData,
@@ -142,6 +143,14 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
     prior_issues = (check_positions(prev["custodian"], prev["fx"], "(prior week)")
                     + check_positions(prev["accounting"], prev["fx"], "(prior week)")
                     ) if prev else []   # prior AUM feeds week-over-week change
+    t = jm.prepare(tickets, as_of)
+    gap_years, gap_n = jm.calendar_gaps(t, as_of)
+    if gap_years:
+        field_issues.append(Issue(
+            WARNING, "jira", "calendar_gap",
+            f"Holiday calendar has no entries for {gap_years}; the age of {gap_n} open "
+            "ticket(s) raised then counts those years' holidays as working days. "
+            "Add the years to config/calendar.yaml."))
     issues = issues_frame(
         field_issues
         + check_positions(cur["custodian"], cur["fx"])
@@ -155,6 +164,23 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
             f"{n_err} data-quality error(s); fix inputs or re-run with --allow-errors:\n"
             + issues[issues["severity"] == ERROR].to_string(index=False))
 
+    if n_err:   # only reachable with --allow-errors
+        # A forced run must still be able to finish: keep the first row per
+        # fund/ISIN and drop rows without a key, so nothing is double-counted.
+        def usable(df: pd.DataFrame) -> pd.DataFrame:
+            return df.dropna(subset=RECON_KEY).drop_duplicates(RECON_KEY)
+        cur = {**cur, "custodian": usable(cur["custodian"]),
+               "accounting": usable(cur["accounting"])}
+        if prev:
+            prev = {**prev, "custodian": usable(prev["custodian"]),
+                    "accounting": usable(prev["accounting"])}
+        forced = Issue(WARNING, "run", "forced_run",
+                       f"Report forced with --allow-errors despite {n_err} data-quality "
+                       "error(s); duplicate or keyless positions were ignored. "
+                       "Do not distribute without saying so.")
+        issues = pd.concat([issues_frame([forced]), issues], ignore_index=True)
+        log.warning(forced.detail)
+
     # ---- reconcile + metrics
     breaks = reconcile(cur["custodian"], cur["accounting"])
     log.info("Reconciliation: %d break(s), abs $%s", len(breaks),
@@ -163,7 +189,6 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
     aum_prev = aum_mod.aum_by_fund(prev["accounting"], prev["custodian"]) if prev else None
     aum_tbl = aum_mod.aum_change(aum_now, aum_prev)
 
-    t = jm.prepare(tickets, as_of)
     kpis = jm.kpis(t, as_of)
 
     # ---- run info (audit trail)

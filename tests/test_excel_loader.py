@@ -54,8 +54,9 @@ def test_to_number_blanks_become_nan():
 
 
 def test_to_number_rejects_garbage():
-    with pytest.raises(ValueError):
-        to_number(pd.Series(["12.5x"], dtype=object))
+    with pytest.raises(SourceFileError, match=r"column 'qty' has 1 non-numeric value\(s\): "
+                                              r"'12\.5x'"):
+        to_number(pd.Series(["12.5x", "3"], dtype=object), "file.xlsx", "qty")
 
 
 def test_generated_isins_have_valid_check_digits():

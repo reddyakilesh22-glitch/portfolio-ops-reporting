@@ -35,12 +35,24 @@ def require_coverage(first: date, last: date) -> None:
                           f"{missing}; add them before running")
 
 
+def uncovered_years(first: date, last: date) -> list[int]:
+    """Years between first and last that have no holiday list."""
+    years, _ = _calendar()
+    return [y for y in range(first.year, last.year + 1) if y not in years]
+
+
 def busday_count(start: pd.Series, end: date) -> pd.Series:
-    """Business days from each start date (inclusive) to end (exclusive)."""
+    """Business days from each start date (inclusive) to end (exclusive).
+
+    The report date's own year must be in the calendar: without it every age
+    from now on would be wrong, so the run stops. An *older* year missing only
+    affects tickets raised back then (their age counts that year's holidays as
+    working days); callers surface that as a warning via `uncovered_years`.
+    """
     if start.empty:
         return pd.Series(dtype="int64", index=start.index)
     s = pd.to_datetime(start).values.astype("datetime64[D]")
-    require_coverage(pd.Timestamp(s.min()).date(), end)
+    require_coverage(end, end)
     counts = np.busday_count(s, np.datetime64(end), holidays=holidays())
     return pd.Series(counts, index=start.index)
 

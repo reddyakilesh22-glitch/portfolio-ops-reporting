@@ -36,14 +36,23 @@ class SourceFileError(RuntimeError):
 
 
 # ------------------------------------------------------------------ helpers
-def to_number(series: pd.Series) -> pd.Series:
-    """Coerce exported numbers: '1,234.50', '(1,234.50)', ' 12 ', '-', ''."""
+def to_number(series: pd.Series, where: str = "", column: str = "") -> pd.Series:
+    """Coerce exported numbers: '1,234.50', '(1,234.50)', ' 12 ', '-', ''.
+
+    Anything else (e.g. 'TBC') stops the run, naming the file, column and
+    values, rather than being guessed at.
+    """
     if pd.api.types.is_numeric_dtype(series):
         return series.astype(float)
     s = series.astype("string").str.strip()
     negative = s.str.match(r"^\(.*\)$", na=False)
     s = s.str.replace(r"[,\s()$]", "", regex=True).replace({"": None, "-": None})
-    out = pd.to_numeric(s, errors="raise").astype(float)
+    out = pd.to_numeric(s, errors="coerce").astype(float)
+    bad = series[out.isna() & s.notna()]
+    if len(bad):
+        values = ", ".join(repr(v) for v in bad.astype(str).unique()[:5])
+        raise SourceFileError(f"{where or 'source file'}: column '{column or series.name}' "
+                              f"has {len(bad)} non-numeric value(s): {values}")
     return out.where(~negative, -out)
 
 
@@ -78,14 +87,15 @@ def _select_columns(df: pd.DataFrame, mapping: dict[str, str], where: str) -> pd
     return df[[headers[src] for src in mapping.values()]].set_axis(list(mapping), axis=1)
 
 
-def _clean_common(df: pd.DataFrame) -> pd.DataFrame:
+def _clean_common(df: pd.DataFrame, where: str, headers: dict[str, str]) -> pd.DataFrame:
+    """`headers` maps our column names to the file's, for error messages."""
     df = df.copy()
     for col in ("isin", "ticker", "description", "asset_class", "currency"):
         df[col] = df[col].astype("string").str.strip()
     df["isin"] = df["isin"].str.upper()
     df["currency"] = df["currency"].str.upper()
     for col in NUMERIC:
-        df[col] = to_number(df[col])
+        df[col] = to_number(df[col], where, headers.get(col, col))
     return df
 
 
@@ -141,11 +151,12 @@ def load_custodian(as_of: date, path: Path | None = None) -> pd.DataFrame:
         log.debug("%s: %d positions, %d non-position rows ignored",
                   where, len(positions), len(dropped))
 
-        positions = _clean_common(positions)
+        positions = _clean_common(positions, where, cfg["columns"])
         if len(total_rows) != 1:
             raise SourceFileError(f"{where}: expected 1 '{cfg['total_label']}' row, "
                                   f"found {len(total_rows)}")
-        control = float(to_number(total_rows["base_mv"]).iloc[0])
+        control = float(to_number(total_rows["base_mv"], where,
+                                  f"{cfg['columns']['base_mv']} (Total row)").iloc[0])
         loaded = positions["base_mv"].sum()
         if abs(control - loaded) > CONTROL_TOLERANCE_USD:
             raise SourceFileError(
@@ -223,7 +234,8 @@ def load_accounting(as_of: date, path: Path | None = None) -> pd.DataFrame:
     cfg = load_yaml("excel_layouts.yaml")["accounting"]
     path = path or source_path("accounting", as_of)
     raw = pd.read_excel(path, sheet_name=cfg["sheet"], dtype=object)
-    df = _clean_common(_select_columns(raw, cfg["columns"], path.name))
+    df = _clean_common(_select_columns(raw, cfg["columns"], path.name), path.name,
+                       cfg["columns"])
 
     dates = pd.to_datetime(df["position_date"]).dt.date.unique()
     if len(dates) != 1 or dates[0] != as_of:
@@ -234,7 +246,8 @@ def load_accounting(as_of: date, path: Path | None = None) -> pd.DataFrame:
     if unknown:
         raise SourceFileError(f"{path.name}: unknown fund code(s) {sorted(unknown)}")
 
-    df["accrued_base"] = to_number(df["accrued_base"]).fillna(0.0)
+    df["accrued_base"] = to_number(df["accrued_base"], path.name,
+                                   cfg["columns"]["accrued_base"]).fillna(0.0)
     df["source"] = "accounting"
     df["as_of"] = as_of
     log.info("Accounting %s: %d positions", as_of, len(df))
@@ -256,7 +269,8 @@ def load_fx(as_of: date, path: Path | None = None) -> pd.Series:
     if df["currency"].duplicated().any():
         raise SourceFileError(f"{path.name}: duplicate currencies "
                               f"{df.loc[df.currency.duplicated(), 'currency'].tolist()}")
-    rates = to_number(df["units_per_usd"]).set_axis(df["currency"]).rename("units_per_usd")
+    rates = (to_number(df["units_per_usd"], path.name, cfg["columns"]["units_per_usd"])
+             .set_axis(df["currency"]).rename("units_per_usd"))
     if rates.isna().any() or (rates <= 0).any():
         raise SourceFileError(f"{path.name}: missing or non-positive rates "
                               f"{rates[rates.isna() | (rates <= 0)].index.tolist()}")
