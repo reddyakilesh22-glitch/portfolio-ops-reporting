@@ -279,10 +279,18 @@ def fetch_snapshot(client: JiraClient | None = None, jql: str | None = None) -> 
 _STRIP_KEYS = {"self", "iconUrl", "avatarUrls", "expand", "accountId", "emailAddress"}
 
 
+def _pseudonym(name: str) -> str:
+    """Stable stand-in for a person's name: same person, same label."""
+    return "user-" + hashlib.sha256(name.encode()).hexdigest()[:8]
+
+
 def _sanitize(obj: Any) -> Any:
-    """Drop site URLs and account identifiers; keep ticket content."""
+    """Drop site URLs and account identifiers and replace people's names with
+    pseudonyms; keep ticket content. Snapshots may be committed to a repo."""
     if isinstance(obj, dict):
-        return {k: _sanitize(v) for k, v in obj.items() if k not in _STRIP_KEYS}
+        return {k: (_pseudonym(v) if k == "displayName" and isinstance(v, str)
+                    else _sanitize(v))
+                for k, v in obj.items() if k not in _STRIP_KEYS}
     if isinstance(obj, list):
         return [_sanitize(v) for v in obj]
     return obj

@@ -167,6 +167,19 @@ Described in [AI_COMMENTARY.md](AI_COMMENTARY.md). In short: Python computes
 every number; a local model only writes sentences; a fact-checker verifies
 each number in the draft; on failure it retries once, then uses a fixed template.
 
+## Security
+
+- **Untrusted text stays text.** Ticket summaries come from Jira and security
+  descriptions from vendor files. The workbook is written with formula and link
+  conversion switched off, so a cell starting with `=` cannot become a live
+  formula. CSV outputs prefix such cells with an apostrophe.
+- **Credentials.** The Jira API token lives only in `.env` (never committed).
+  The Jira URL must be `https://`, and a warning is raised if `.env` is readable
+  by other users on the machine.
+- **Snapshots are publishable.** Site URLs and account ids are removed and
+  people's names are replaced by stable pseudonyms before a snapshot is saved.
+- **CI** runs with a read-only token.
+
 ## Exit codes
 
 | Code | Meaning |
