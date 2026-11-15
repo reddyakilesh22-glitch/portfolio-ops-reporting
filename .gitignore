@@ -9,3 +9,5 @@ output/
 .coverage
 htmlcov/
 .mypy_cache/
+data/daily/
+data/history.db
