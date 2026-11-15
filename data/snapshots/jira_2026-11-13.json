@@ -1,5 +1,5 @@
 {
- "extracted_at": "2026-11-14T20:20:21+00:00",
+ "extracted_at": "2026-11-15T16:15:59+00:00",
  "jql": "project = OPSREC ORDER BY key ASC",
  "field_ids": {
   "fund": "customfield_10044",
@@ -9,6 +9,7 @@
   "business_date": "customfield_10048",
   "resolved_business_date": "customfield_10049"
  },
+ "field_warnings": [],
  "issues": [
   {
    "id": "10018",

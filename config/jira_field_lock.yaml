@@ -1,0 +1,28 @@
+# Jira custom field ids pinned per site (written by scripts/jira_setup.py).
+# Lets a renamed field be followed by id instead of stopping the run.
+site_fingerprint: af7cd3fd84765179
+fields:
+  fund:
+    id: customfield_10044
+    name: Fund
+    type: com.atlassian.jira.plugin.system.customfieldtypes:select
+  ops_team:
+    id: customfield_10045
+    name: Ops Team
+    type: com.atlassian.jira.plugin.system.customfieldtypes:select
+  break_type:
+    id: customfield_10046
+    name: Break Type
+    type: com.atlassian.jira.plugin.system.customfieldtypes:select
+  break_amount_usd:
+    id: customfield_10047
+    name: Break Amount USD
+    type: com.atlassian.jira.plugin.system.customfieldtypes:float
+  business_date:
+    id: customfield_10048
+    name: Business Date
+    type: com.atlassian.jira.plugin.system.customfieldtypes:datepicker
+  resolved_business_date:
+    id: customfield_10049
+    name: Resolved Business Date
+    type: com.atlassian.jira.plugin.system.customfieldtypes:datepicker
