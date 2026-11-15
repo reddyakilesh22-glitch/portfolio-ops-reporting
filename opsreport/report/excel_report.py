@@ -159,7 +159,7 @@ def _summary(w: _Writer, d: ReportData) -> None:
         ("AUM change WoW", total.get("aum_change"), "money"),
         ("Recon breaks", len(d.breaks), "int"),
         ("High-materiality breaks", high, "int"),
-        ("Break exposure (abs $)", d.breaks["abs_base_mv_diff"].sum(), "money"),
+        ("Total break difference", d.breaks["abs_base_mv_diff"].sum(), "money"),
         ("Open ops tickets", k["open_tickets"], "int"),
         ("Overdue vs SLA", k["overdue_tickets"], "int"),
         ("SLA met, last 4 weeks", k["sla_met_4wk"], "pct"),
@@ -208,7 +208,7 @@ def default_commentary(d: ReportData) -> list[str]:
                      f"{total['aum_change'] / 1e6:+,.1f}M ({total['aum_change_pct']:+.1%}) "
                      "week over week.")
     if len(d.breaks):
-        top = d.breaks.iloc[0]
+        top = d.breaks.nlargest(1, "abs_base_mv_diff").iloc[0]
         lines.append(f"{len(d.breaks)} reconciliation breaks, "
                      f"${d.breaks['abs_base_mv_diff'].sum() / 1e6:,.1f}M absolute; largest is "
                      f"{top['fund_code']} {top['ticker']} ({top['break_type']}, "
@@ -225,9 +225,11 @@ def default_commentary(d: ReportData) -> list[str]:
 def _breaks(w: _Writer, d: ReportData) -> None:
     ws = w.sheet("Breaks")
     ws.write(0, 0, f"Custodian vs fund accounting breaks, {d.as_of:%d %b %Y}", w.f["title"])
-    ws.write(1, 0, "Sorted by absolute base-currency difference. Positive diff = custodian "
-                   "higher.", w.f["subtitle"])
-    cols = ["fund_code", "ticker", "break_type", "materiality", "likely_cause",
+    ws.write(1, 0, "Sorted by exposure: the $ difference, or the whole position for an "
+                   "unprocessed corporate action. Positive diff = custodian higher.",
+             w.f["subtitle"])
+    cols = ["fund_code", "ticker", "break_type", "materiality", "exposure_usd",
+            "likely_cause",
             "quantity_cust", "quantity_acct", "quantity_diff", "price_cust", "price_acct",
             "base_mv_cust", "base_mv_acct", "base_mv_diff", "isin", "description",
             "custodian_locations"]

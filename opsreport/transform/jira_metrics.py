@@ -5,7 +5,8 @@ business-date fields. That keeps a re-run of last week's report identical to
 what was reported last week, regardless of what happened to tickets since.
 
 Tickets marked Done with no Resolved Business Date can't be placed in time;
-they're excluded here and listed in the Data Quality tab.
+they're excluded here and listed in the Data Quality tab. Tickets with no due
+date are counted as open/resolved but left out of SLA and overdue figures.
 """
 
 from __future__ import annotations
@@ -22,7 +23,8 @@ AGE_BUCKETS = [(-1, 1, "0-1d"), (1, 5, "2-5d"), (5, 10, "6-10d"), (10, 10_000, "
 
 def prepare(tickets: pd.DataFrame, as_of: date) -> pd.DataFrame:
     df = tickets.copy()
-    df["fund"] = df["fund"].fillna("(blank)")
+    for col in ("fund", "ops_team"):          # keep them visible, don't drop them
+        df[col] = df[col].fillna("(blank)")
     undatable = df["status_category"].eq("done") & df["resolved_business_date"].isna()
     df = df[~undatable & df["business_date"].notna()]
     df = df[df["business_date"] <= as_of].copy()
@@ -30,9 +32,12 @@ def prepare(tickets: pd.DataFrame, as_of: date) -> pd.DataFrame:
     resolved = df["resolved_business_date"]
     df["open_as_of"] = resolved.isna() | (resolved > as_of)
     df["age_bdays"] = busday_count(df["business_date"], as_of)
-    df["overdue"] = df["open_as_of"] & (df["due_date"] < as_of)
-    df["sla_met"] = np.where(resolved.notna() & (resolved <= as_of),
-                             resolved <= df["due_date"], np.nan)
+    # No due date = no SLA to measure against: neither overdue nor a miss.
+    has_due = df["due_date"].notna()
+    due = df["due_date"].where(has_due, as_of)
+    df["overdue"] = df["open_as_of"] & has_due & (due < as_of)
+    df["sla_met"] = np.where(resolved.notna() & (resolved <= as_of) & has_due,
+                             resolved <= due, np.nan)
     df["age_bucket"] = pd.cut(df["age_bdays"], [b[0] for b in AGE_BUCKETS] + [10_000],
                               labels=[b[2] for b in AGE_BUCKETS])
     return df

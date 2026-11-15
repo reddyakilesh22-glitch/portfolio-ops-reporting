@@ -22,6 +22,10 @@ Oversight, Trade Support, Corporate Actions, Reference Data), fund controllers.
    source .venv/bin/activate
    python -m opsreport run --as-of <friday> --prior <previous friday> --jira live
    ```
+   If you need to run again the same morning (say, after a corrected file
+   arrives), drop `--jira live`: the run reuses the snapshot, so the ticket
+   numbers don't shift between runs. Use `--refresh-snapshot` only when you
+   deliberately want Jira as it is now.
 3. **Check the exit code and log** (`output/run.log`):
    | Exit | Meaning | Action |
    |---|---|---|
@@ -74,6 +78,8 @@ unexpected error (a bug): open an issue with the log attached.
 | `Jira ... 401` | API token expired or revoked | Create a new token, update `.env`, never paste it in chat or tickets |
 | `Jira ... 429` (repeated) | Rate limiting | The client retries automatically; if it still fails, re-run later |
 | `Holiday calendar ... has no entries for [YYYY]` | New year not added to the calendar | Add the exchange's published closures to `config/calendar.yaml` (PR) |
+| `A Jira snapshot for <date> already exists` | `--jira live` used for a week that already has a saved pull | Re-run without `--jira live`; add `--refresh-snapshot` only to replace it on purpose |
+| `duplicate_lot` (DQ error) | The custodian statement lists the same fund, security and location twice | Ask the custodian for a corrected statement; do not delete the row yourself |
 | `No Jira snapshot on/after` | Running offline for a week with no snapshot | Run with `--jira live` |
 
 ### DQ errors (exit 2)

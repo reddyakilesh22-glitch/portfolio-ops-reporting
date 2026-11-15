@@ -26,7 +26,7 @@ def facts(data):
 # Real drafts from llama3.2 plus hand-written cases. (text, should_pass)
 CASES = [
     # --- must be rejected
-    ("There are three high-materiality reconciliation breaks totaling $14.9M.", False),
+    ("There are four high-materiality reconciliation breaks totaling $14.9M.", False),
     ("The team with the most overdue tickets is Reconciliation with 7 open tickets.", False),
     ("ISC AUM fell 1.3% week over week.", False),          # GEF's number on ISC
     ("Total AUM was $352.0M.", False),                     # invented
@@ -34,7 +34,7 @@ CASES = [
     ("OPSREC-999 is the oldest ticket.", False),           # ticket doesn't exist
     # --- must be accepted
     ("Reconciliation breaks total $14.9M across all funds, with a high-materiality "
-     "break count of 3 and missing trade breaks affecting GEF NVDA ($8.4M) and "
+     "break count of 4 and missing trade breaks affecting GEF NVDA ($8.4M) and "
      "ISC 4385 ($3.4M).", True),
     ("There are 7 data-quality warnings; a review is necessary.", True),
     ("Reconciliation has 7 overdue tickets out of 12 open; 19 tickets are open and "

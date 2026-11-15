@@ -28,7 +28,7 @@ BREAK_COLUMNS = [
     "materiality", "likely_cause", "currency_cust", "currency_acct",
     "quantity_cust", "quantity_acct", "quantity_diff", "price_cust", "price_acct",
     "fx_rate_cust", "fx_rate_acct", "base_mv_cust", "base_mv_acct", "base_mv_diff",
-    "abs_base_mv_diff",
+    "abs_base_mv_diff", "exposure_usd",
 ]
 
 
@@ -63,6 +63,9 @@ def reconcile(custodian: pd.DataFrame, accounting: pd.DataFrame,
     local_same = ((m["local_mv_cust"] - m["local_mv_acct"]).abs()
                   <= m["local_mv_acct"].abs() * tol["local_mv_rel"] + tol["base_mv_abs_usd"])
     ccy_diff = m["currency_cust"].ne(m["currency_acct"])
+    fx_off = ((m["fx_rate_cust"] - m["fx_rate_acct"]).abs()
+              / m["fx_rate_acct"].abs()) > cfg["fx_rate_rel_tol"]
+    m["_px_off"], m["_fx_off"] = px_off, fx_off
 
     ratio = m["quantity_cust"] / m["quantity_acct"]
     near_split = pd.Series(False, index=m.index)
@@ -86,16 +89,37 @@ def reconcile(custodian: pd.DataFrame, accounting: pd.DataFrame,
 
     breaks = m[m["break_type"].notna()].copy()
     breaks["likely_cause"] = breaks.apply(_cause, axis=1)
+
+    # Exposure = what is at risk, which is not always the $ difference. After an
+    # unprocessed split the values still agree, but the whole position carries
+    # the wrong quantity, so the position value is what's exposed.
+    position = breaks[["base_mv_cust", "base_mv_acct"]].abs().max(axis=1)
+    breaks["exposure_usd"] = breaks["abs_base_mv_diff"].where(
+        breaks["break_type"] != "Corporate Action", position)
     bands = cfg["materiality"]
     breaks["materiality"] = pd.cut(
-        breaks["abs_base_mv_diff"], [-1, bands["medium"], bands["high"], float("inf")],
+        breaks["exposure_usd"], [-1, bands["medium"], bands["high"], float("inf")],
         labels=["Low", "Medium", "High"]).astype(str)
-    breaks = breaks.sort_values(["abs_base_mv_diff"], ascending=False)
+    breaks = breaks.sort_values(["exposure_usd"], ascending=False)
     cols = BREAK_COLUMNS + (["custodian_locations"] if extra else [])
     return breaks[cols].reset_index(drop=True)
 
 
 def _cause(r: pd.Series) -> str:
+    """Primary cause, plus any second difference the label would otherwise hide."""
+    text = _primary_cause(r)
+    t = r["break_type"]
+    extra = []
+    if t == "Quantity Break" and r["_px_off"]:
+        extra.append(f"price also differs ({r['price_acct'] / r['price_cust'] - 1:+.2%} "
+                     "in accounting)")
+    if t in ("Quantity Break", "Price Break") and r["_fx_off"]:
+        extra.append(f"FX rate also differs ({r['fx_rate_acct']:g} acct vs "
+                     f"{r['fx_rate_cust']:g} cust)")
+    return text + ("; " + "; ".join(extra) if extra else "")
+
+
+def _primary_cause(r: pd.Series) -> str:
     t = r["break_type"]
     if t == "Missing Trade":
         if pd.isna(r["quantity_cust"]):
