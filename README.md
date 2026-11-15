@@ -14,7 +14,13 @@ tickets that track those breaks in Jira.
 | Jira extract (REST v3, `search/jql` paging, name-based field mapping) | done |
 | Excel extract (custodian, fund accounting, FX workbooks) | done |
 | Validation, reconciliation, AUM, Jira SLA metrics, Excel report | done |
-| Incidents, runbook, AI commentary with numeric guardrails | next |
+| Runbook + 4 incidents fixed via issue -> test -> PR | done |
+| AI commentary with numeric guardrails | next |
+
+## Operations
+
+- [Runbook](docs/RUNBOOK.md): weekly checklist, re-runs, troubleshooting by error message
+- [Incident log](docs/INCIDENTS.md): what broke, root cause, fix, and the PR for each
 
 ## Run the weekly report
 
