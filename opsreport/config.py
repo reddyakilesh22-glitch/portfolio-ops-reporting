@@ -13,6 +13,10 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "config"
 
 
+class ConfigError(RuntimeError):
+    """Required configuration (e.g. .env settings) is missing or invalid."""
+
+
 @dataclass(frozen=True)
 class JiraSettings:
     base_url: str
@@ -29,7 +33,7 @@ def load_jira_settings() -> JiraSettings:
         if not os.getenv(k, "").strip()
     ]
     if missing:
-        raise RuntimeError(f"Missing settings in .env: {', '.join(missing)}")
+        raise ConfigError(f"Missing settings in .env: {', '.join(missing)}")
     return JiraSettings(
         base_url=os.environ["JIRA_BASE_URL"].strip().rstrip("/"),
         email=os.environ["JIRA_EMAIL"].strip(),

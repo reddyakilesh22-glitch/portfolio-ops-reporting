@@ -47,6 +47,17 @@ def to_number(series: pd.Series) -> pd.Series:
     return out.where(~negative, -out)
 
 
+def parse_statement_date(text: str, formats: list[str], where: str) -> date:
+    """Parse a statement date using the first configured format that fits."""
+    for fmt in formats:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise SourceFileError(f"{where}: can't read statement date '{text}'; tried formats "
+                          f"{formats} (config/excel_layouts.yaml: as_of_formats)")
+
+
 def source_path(kind: str, as_of: date, raw_dir: Path = RAW_DIR) -> Path:
     pattern = load_yaml("excel_layouts.yaml")[kind]["file_pattern"]
     path = raw_dir / as_of.isoformat() / pattern.format(yyyymmdd=f"{as_of:%Y%m%d}")
@@ -113,9 +124,9 @@ def load_custodian(as_of: date, path: Path | None = None) -> pd.DataFrame:
         stamp = preamble[preamble.str.startswith(cfg["as_of_prefix"])]
         if stamp.empty:
             raise SourceFileError(f"{where}: no '{cfg['as_of_prefix']}' line in preamble")
-        file_date = datetime.strptime(
-            stamp.iloc[0].removeprefix(cfg["as_of_prefix"]).strip(), cfg["as_of_format"]
-        ).date()
+        file_date = parse_statement_date(
+            stamp.iloc[0].removeprefix(cfg["as_of_prefix"]).strip(),
+            cfg["as_of_formats"], where)
         if file_date != as_of:
             raise SourceFileError(f"{where}: statement is as of {file_date}, expected {as_of}")
 
