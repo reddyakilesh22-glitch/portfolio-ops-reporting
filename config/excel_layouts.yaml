@@ -21,6 +21,8 @@ custodian:
     local_mv: Local Market Value
     fx_rate: FX Rate
     base_mv: Base Market Value (USD)
+  optional_columns:            # used when present (statement format v2+)
+    locations: Location
 
 accounting:
   file_pattern: "fund_accounting_positions_{yyyymmdd}.xlsx"

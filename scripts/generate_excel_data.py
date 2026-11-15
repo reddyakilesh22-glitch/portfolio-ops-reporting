@@ -307,17 +307,52 @@ def add_rounding_noise(rng: random.Random, accounting: list[Position]) -> None:
 
 
 # ------------------------------------------------------------------ writers
+DEPOSITORY = {"USD": "DTC", "GBP": "CREST", "CHF": "SIX SIS", "JPY": "JASDEC",
+              "EUR": "Euroclear", "DKK": "Euronext VPS", "SEK": "Euroclear Sweden",
+              "AUD": "ASX Clear", "MXN": "Indeval", "BRL": "B3", "IDR": "KSEI",
+              "ZAR": "Strate"}
+# Statement format v2 (custodian re-issued 2026-11-13 in it): a Location column,
+# and a holding may be split across depositories into several rows (lots).
+V2_FROM = date(2026, 11, 13)
+
+
+def _location(p: Position) -> str:
+    if p.is_cash:
+        return "Cash"
+    if p.currency == "USD" and p.is_bond and p.asset_class != "Corp Bond":
+        return "Fed"
+    return DEPOSITORY[p.currency]
+
+
+def _lots(p: Position, lot_rng: random.Random | None) -> list[tuple[str, float]]:
+    """Split a holding across depositories (v2 format only)."""
+    if lot_rng is None or p.is_cash or lot_rng.random() > 0.2:
+        return [(_location(p), p.quantity)]
+    step = 100_000 if p.is_bond else 100
+    first = max(step, round(p.quantity * lot_rng.uniform(0.3, 0.8) / step) * step)
+    if first >= p.quantity:
+        return [(_location(p), p.quantity)]
+    return [(_location(p), first), ("Euroclear" if _location(p) != "Euroclear"
+                                    else "Clearstream", p.quantity - first)]
+
+
 def write_custodian(path: Path, book: list[Position], fx: dict[str, float],
-                    as_of: date, funds: list[dict], rng: random.Random) -> None:
+                    as_of: date, funds: list[dict], rng: random.Random,
+                    lot_rng: random.Random | None = None) -> None:
+    """Write the custodian statement. With `lot_rng`, use the v2 format."""
+    v2 = lot_rng is not None
     wb = Workbook()
     wb.remove(wb.active)
     header = ["Account", "ISIN", "Security Description", "Ticker", "Asset Type", "Ccy",
               "Shares/Par Value", "Local Price", "Local Market Value", "FX Rate",
               "Base Market Value (USD)"]
+    if v2:
+        header.insert(5, "Location")
     for f in funds:
         ws = wb.create_sheet(f["custodian_sheet"])
         ws.append([CUSTODIAN_NAME])
-        ws.append([f"Holdings Statement - Account {f['custodian_account']}"])
+        ws.append([f"Holdings Statement - Account {f['custodian_account']}"
+                   + (" (statement format v2)" if v2 else "")])
         ws.append([f"As of: {as_of:%d-%b-%Y}"])
         ws.append([f"Generated: {as_of:%Y-%m-%d} 22:15 ET"])
         ws.append([])
@@ -329,27 +364,35 @@ def write_custodian(path: Path, book: list[Position], fx: dict[str, float],
         total = 0.0
         for p in sorted((p for p in book if p.fund == f["code"]),
                         key=lambda p: (p.is_cash, p.ticker)):
-            local = p.local_mv()
             rate = fx[p.currency]
-            base = round(local / rate, 2)
-            total += base
-            qty: float | str = p.quantity
-            if rng.random() < 0.25:  # numbers exported as text
-                qty = f"{p.quantity:,.2f}"
-            isin = p.isin + ("  " if rng.random() < 0.15 else "")
-            ccy = p.currency.lower() if rng.random() < 0.1 else p.currency
-            ws.append([f["custodian_account"], isin, p.description, p.ticker,
+            # Same rng draws per holding as v1, so v1 output is unchanged.
+            as_text = rng.random() < 0.25
+            pad = rng.random() < 0.15
+            lower = rng.random() < 0.1
+            for i, (loc, q) in enumerate(_lots(p, lot_rng)):
+                lot = replace(p, quantity=q)
+                local = lot.local_mv()
+                base = round(local / rate, 2)
+                total += base
+                qty: float | str = f"{q:,.2f}" if as_text and i == 0 else q
+                isin = p.isin + ("  " if pad and i == 0 else "")
+                ccy = p.currency.lower() if lower and i == 0 else p.currency
+                row = [f["custodian_account"], isin, p.description, p.ticker,
                        p.asset_class, ccy, qty, None if p.is_cash else p.price,
-                       local, rate, base])
+                       local, rate, base]
+                if v2:
+                    row.insert(5, loc)
+                ws.append(row)
         ws.append([])
-        ws.append(["Total", None, None, None, None, None, None, None, None, None,
-                   round(total, 2)])
+        ws.append(["Total"] + [None] * (len(header) - 2) + [round(total, 2)])
         ws.append([])
         ws.append(["*** End of Report ***"])
         ws.append(["Values are indicative and subject to final pricing. "
                    "Synthetic data for demonstration only."])
-        for col, width in zip("ABCDEFGHIJK", [14, 16, 36, 16, 16, 6, 18, 12, 18, 10, 22],
-                              strict=True):
+        widths = [14, 16, 36, 16, 16, 6, 18, 12, 18, 10, 22]
+        if v2:
+            widths.insert(5, 16)
+        for col, width in zip("ABCDEFGHIJKL", widths, strict=False):
             ws.column_dimensions[col].width = width
     wb.save(path)
 
@@ -415,8 +458,9 @@ def generate(out_raw: Path = RAW_DIR, out_expected: Path = EXPECTED_DIR,
         day = out_raw / as_of.isoformat()
         day.mkdir(parents=True, exist_ok=True)
         stamp = f"{as_of:%Y%m%d}"
+        lot_rng = random.Random(seed + 2) if as_of >= V2_FROM else None
         write_custodian(day / f"custodian_holdings_{stamp}.xlsx", custodian, fx, as_of,
-                        funds, rng)
+                        funds, rng, lot_rng)
         write_accounting(day / f"fund_accounting_positions_{stamp}.xlsx", accounting,
                          acct_fx, as_of, funds, rng)
         write_fx(day / f"fx_rates_{stamp}.xlsx", fx, as_of)
