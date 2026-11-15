@@ -52,3 +52,19 @@ fx:
     currency: Currency
     units_per_usd: Units per USD
     rate_date: Rate Date
+
+# Open-trades report from the order management system (daily run only):
+# trades booked in fund accounting that the custodian has not received yet.
+pending_trades:
+  file_pattern: "pending_trades_{yyyymmdd}.xlsx"
+  sheet: Open Trades
+  columns:
+    trade_id: Trade ID
+    fund_code: Fund Code
+    isin: Security ID
+    ticker: Ticker
+    side: Side
+    quantity: Quantity
+    trade_date: Trade Date
+    settle_date: Contractual Settle Date
+    report_date: Report Date
