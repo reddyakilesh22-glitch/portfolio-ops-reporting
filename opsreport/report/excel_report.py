@@ -9,6 +9,19 @@ from pathlib import Path
 import pandas as pd
 
 NAVY, GREY, RED, AMBER, GREEN = "#1F3A5F", "#F2F4F7", "#C0392B", "#B9770E", "#1E7B4C"
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """Copy of `df` safe to open in a spreadsheet: text cells that a spreadsheet
+    would run as a formula get a leading apostrophe. Numbers are untouched."""
+    out = df.copy()
+    for col in out.columns:
+        if not pd.api.types.is_numeric_dtype(out[col]):
+            out[col] = out[col].map(
+                lambda v: "'" + v if isinstance(v, str) and v.startswith(_FORMULA_PREFIXES)
+                else v)
+    return out
 
 
 @dataclass
@@ -54,8 +67,13 @@ def _kind(col: str) -> str:
 
 class _Writer:
     def __init__(self, path: Path):
-        self.xw = pd.ExcelWriter(path, engine="xlsxwriter",
-                                 date_format="yyyy-mm-dd", datetime_format="yyyy-mm-dd hh:mm")
+        # Text in this report comes from Jira and vendor files, so it is never
+        # trusted: a string starting with "=" must stay text, not become a formula.
+        self.xw = pd.ExcelWriter(
+            path, engine="xlsxwriter", date_format="yyyy-mm-dd",
+            datetime_format="yyyy-mm-dd hh:mm",
+            engine_kwargs={"options": {"strings_to_formulas": False,
+                                       "strings_to_urls": False}})
         wb = self.wb = self.xw.book
         self.f = {
             "title": wb.add_format({"bold": True, "font_size": 16, "font_color": NAVY}),

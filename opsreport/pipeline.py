@@ -25,7 +25,12 @@ from opsreport.extract.jira_client import (
     snapshot_to_frame,
 )
 from opsreport.reconcile.positions import reconcile, summarize
-from opsreport.report.excel_report import ReportData, default_commentary, write_report
+from opsreport.report.excel_report import (
+    ReportData,
+    csv_safe,
+    default_commentary,
+    write_report,
+)
 from opsreport.transform import aum as aum_mod
 from opsreport.transform import jira_metrics as jm
 from opsreport.validate.checks import (
@@ -196,8 +201,8 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
 
     day_dir = out_dir / as_of.isoformat()
     path = write_report(data, day_dir / f"portfolio_ops_report_{as_of:%Y%m%d}.xlsx")
-    breaks.to_csv(day_dir / f"breaks_{as_of:%Y%m%d}.csv", index=False)
-    issues.to_csv(day_dir / f"data_quality_{as_of:%Y%m%d}.csv", index=False)
+    csv_safe(breaks).to_csv(day_dir / f"breaks_{as_of:%Y%m%d}.csv", index=False)
+    csv_safe(issues).to_csv(day_dir / f"data_quality_{as_of:%Y%m%d}.csv", index=False)
     log.info("Report written: %s (%.1fs)", _rel(path),
              (datetime.now() - started).total_seconds())
     return RunResult(path, breaks, issues, data)
