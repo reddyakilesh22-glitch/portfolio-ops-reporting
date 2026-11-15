@@ -398,7 +398,9 @@ def write_custodian(path: Path, book: list[Position], fx: dict[str, float],
 
 
 def write_accounting(path: Path, book: list[Position], fx: dict[str, float],
-                     as_of: date, funds: list[dict], rng: random.Random) -> None:
+                     as_of: date, funds: list[dict], rng: random.Random,
+                     pricing_source: dict[str, str] | None = None) -> None:
+    """With `pricing_source` (ISIN -> vendor), use it instead of a random vendor."""
     names = {f["code"]: f["name"] for f in funds}
     rows = []
     for p in book:
@@ -422,8 +424,9 @@ def write_accounting(path: Path, book: list[Position], fx: dict[str, float],
             "FX Rate": rate,
             "MV Base": round(local / rate, 2),
             "Accrued Income Base": accrued,
-            "Pricing Source": "Cash" if p.is_cash else rng.choice(["VendorA", "VendorA",
-                                                                   "VendorB"]),
+            "Pricing Source": "Cash" if p.is_cash else (
+                pricing_source[p.isin] if pricing_source
+                else rng.choice(["VendorA", "VendorA", "VendorB"])),
             "Position Date": as_of,
         })
     df = pd.DataFrame(rows).sort_values(["Fund Code", "Ticker"])
