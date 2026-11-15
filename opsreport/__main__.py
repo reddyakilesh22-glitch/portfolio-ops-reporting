@@ -13,13 +13,14 @@ from datetime import date
 from pathlib import Path
 
 from opsreport.config import ConfigError
-from opsreport.extract.excel_loader import SourceFileError
+from opsreport.extract.excel_loader import RAW_DIR, SourceFileError
 from opsreport.extract.jira_client import JiraError
-from opsreport.pipeline import OUTPUT_DIR, DataQualityError, run
+from opsreport.pipeline import OUTPUT_DIR, DataQualityError, SnapshotExistsError, run
 
 # Failures with a clear cause and a runbook entry: one line on the console.
 # Anything else is a bug and keeps its full traceback.
-KNOWN_FAILURES = (SourceFileError, JiraError, ConfigError, FileNotFoundError)
+KNOWN_FAILURES = (SourceFileError, JiraError, ConfigError, FileNotFoundError,
+                  SnapshotExistsError)
 _trace = logging.getLogger("opsreport.trace")
 
 
@@ -33,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--jira", choices=["snapshot", "live"], default="snapshot",
                    help="snapshot (default, offline) or live pull that saves a snapshot")
     r.add_argument("--snapshot", type=Path, help="explicit Jira snapshot file")
+    r.add_argument("--refresh-snapshot", action="store_true",
+                   help="with --jira live: replace an existing snapshot for this date")
+    r.add_argument("--raw-dir", type=Path, default=RAW_DIR,
+                   help="folder holding <date>/ input workbooks (default: data/raw)")
     r.add_argument("--out", type=Path, default=OUTPUT_DIR)
     r.add_argument("--allow-errors", action="store_true",
                    help="write the report even if data-quality ERRORs are found")
@@ -56,7 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     log = logging.getLogger("opsreport")
     try:
         res = run(args.as_of, args.prior, args.jira, args.snapshot, args.out,
-                  args.allow_errors, args.commentary, args.model)
+                  args.allow_errors, args.commentary, args.model,
+                  args.refresh_snapshot, args.raw_dir)
     except DataQualityError as exc:
         log.error("%s", exc)
         return 2

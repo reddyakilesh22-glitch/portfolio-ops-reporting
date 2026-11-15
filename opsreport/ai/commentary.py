@@ -128,7 +128,7 @@ def build_facts(d) -> FactSheet:
         "high")
     for t, n in b["break_type"].value_counts().items():
         add(f"{t} breaks (count)", str(n), t.split()[0].lower())  # distinctive word
-    for _, r in b.head(3).iterrows():
+    for _, r in b.nlargest(3, "abs_base_mv_diff").iterrows():
         entities |= {r["fund_code"], str(r["ticker"])}
         add(f"Large break {r['fund_code']} {r['ticker']} ({r['break_type']}), absolute "
             "difference", money(r["abs_base_mv_diff"]), f"<{r['ticker']}>")

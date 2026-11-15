@@ -46,6 +46,15 @@ class DataQualityError(RuntimeError):
     pass
 
 
+class SnapshotExistsError(RuntimeError):
+    """A live Jira pull would replace a snapshot that reports were built from."""
+
+
+def _rel(path: Path) -> str:
+    """Path relative to the project when inside it, otherwise as given."""
+    return str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+
+
 @dataclass
 class RunResult:
     report_path: Path
@@ -91,18 +100,26 @@ def resolve_snapshot(as_of: date, explicit: Path | None) -> Path:
 def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
         snapshot: Path | None = None, out_dir: Path = OUTPUT_DIR,
         allow_errors: bool = False, commentary: str = "template",
-        model: str = commentary_mod.DEFAULT_MODEL) -> RunResult:
+        model: str = commentary_mod.DEFAULT_MODEL, refresh_snapshot: bool = False,
+        raw_dir: Path = excel_loader.RAW_DIR) -> RunResult:
     started = datetime.now()
     log.info("Run start: as_of=%s prior=%s jira=%s", as_of, prior, jira)
 
     # ---- extract
-    cur = excel_loader.load_all(as_of)
-    prev = excel_loader.load_all(prior) if prior else None
+    cur = excel_loader.load_all(as_of, raw_dir)
+    prev = excel_loader.load_all(prior, raw_dir) if prior else None
     if jira == "live":
-        snap = fetch_snapshot()
         snap_path = SNAPSHOT_DIR / f"jira_{as_of.isoformat()}.json"
+        if snap_path.exists() and not refresh_snapshot:
+            # A snapshot is the record of what a report was built from. A live
+            # pull shows Jira as it is *now*, so it must never silently replace it.
+            raise SnapshotExistsError(
+                f"A Jira snapshot for {as_of} already exists ({_rel(snap_path)}). "
+                "Re-run without --jira live to reuse it, or add --refresh-snapshot "
+                "to replace it on purpose.")
+        snap = fetch_snapshot()
         save_snapshot(snap, snap_path)
-        log.info("Saved Jira snapshot %s", snap_path.relative_to(ROOT))
+        log.info("Saved Jira snapshot %s", _rel(snap_path))
     else:
         snap_path = resolve_snapshot(as_of, snapshot)
         snap = load_snapshot(snap_path)
@@ -117,10 +134,14 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
         field_issues.append(Issue(WARNING, "run", "as_of_not_business_day",
                                   f"{as_of} is a weekend or exchange holiday; "
                                   "check the run date"))
+    prior_issues = (check_positions(prev["custodian"], prev["fx"], "(prior week)")
+                    + check_positions(prev["accounting"], prev["fx"], "(prior week)")
+                    ) if prev else []   # prior AUM feeds week-over-week change
     issues = issues_frame(
         field_issues
         + check_positions(cur["custodian"], cur["fx"])
         + check_positions(cur["accounting"], cur["fx"])
+        + prior_issues
         + check_jira(tickets))
     n_err = int((issues["severity"] == ERROR).sum())
     log.info("Data quality: %d error(s), %d warning(s)", n_err, len(issues) - n_err)
@@ -141,7 +162,7 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
     kpis = jm.kpis(t, as_of)
 
     # ---- run info (audit trail)
-    inputs = [excel_loader.source_path(k, d) for d in filter(None, [as_of, prior])
+    inputs = [excel_loader.source_path(k, d, raw_dir) for d in filter(None, [as_of, prior])
               for k in ("custodian", "accounting", "fx")] + [snap_path]
     run_info = pd.DataFrame(
         [("as_of", as_of.isoformat()), ("prior", prior.isoformat() if prior else ""),
@@ -153,7 +174,7 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
          ("opsreport_version", __version__), ("git_commit", _git_commit()),
          ("python", platform.python_version()), ("pandas", pd.__version__),
          ("run_started", started.isoformat(timespec="seconds"))]
-        + [(f"input: {p.relative_to(ROOT)}", f"sha256 {_sha256(p)}") for p in inputs],
+        + [(f"input: {_rel(p)}", f"sha256 {_sha256(p)}") for p in inputs],
         columns=["item", "value"])
 
     data = ReportData(
@@ -177,6 +198,6 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
     path = write_report(data, day_dir / f"portfolio_ops_report_{as_of:%Y%m%d}.xlsx")
     breaks.to_csv(day_dir / f"breaks_{as_of:%Y%m%d}.csv", index=False)
     issues.to_csv(day_dir / f"data_quality_{as_of:%Y%m%d}.csv", index=False)
-    log.info("Report written: %s (%.1fs)", path.relative_to(ROOT) if path.is_relative_to(ROOT)
-             else path, (datetime.now() - started).total_seconds())
+    log.info("Report written: %s (%.1fs)", _rel(path),
+             (datetime.now() - started).total_seconds())
     return RunResult(path, breaks, issues, data)

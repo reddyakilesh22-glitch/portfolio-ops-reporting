@@ -68,7 +68,7 @@ scripts/                   one-off helpers, not part of the weekly run
   jira_setup.py            creates the demo Jira project and custom fields
   seed_jira.py             fills it with 160 synthetic tickets
 
-tests/                     89 tests; none need Jira, Ollama or the network
+tests/                     automated tests; none need Jira, Ollama or the network
 docs/                      CONCEPTS, ARCHITECTURE, RUNBOOK, INCIDENTS, AI_COMMENTARY
 ```
 
@@ -105,15 +105,18 @@ Safety checks that stop the run with a clear message:
   is renamed, the run follows the id and raises a warning instead of stopping.
 - Every live pull is saved as a **snapshot** with site URLs and account ids
   removed. Runs default to the snapshot, so tests and re-runs work offline.
+  A live pull will not replace an existing snapshot unless `--refresh-snapshot`
+  is given: the snapshot is the record of what a report was built from.
 
 ### 3. Validate (`validate/checks.py`)
 
 | Severity | Effect | Checks |
 |---|---|---|
-| ERROR | Run stops, exit code 2 | Blank required field; same fund and ISIN twice; ISIN fails its check digit; currency with no FX rate; duplicate Jira key |
-| WARNING | Listed on the Data Quality tab | Quantity zero or negative; market value ≠ quantity × price; FX rate differs from the official file; Jira ticket missing a field, Done without a resolved date, or resolved before it was raised; Jira field renamed; run date is not a business day |
+| ERROR | Run stops, exit code 2 | Blank required field; same fund and ISIN twice; the same row twice on the custodian statement; ISIN fails its check digit; currency with no FX rate; duplicate Jira key |
+| WARNING | Listed on the Data Quality tab | Quantity zero or negative; market value ≠ quantity × price; FX rate differs from the official file; Jira ticket missing a field or due date, Done without a resolved date, or resolved before it was raised; Jira field renamed; run date is not a business day |
 
-Checks never repair data. They say what is wrong and where.
+Checks never repair data. They say what is wrong and where. The prior week's
+files get the same position checks, because they feed the week-over-week change.
 
 ### 4. Reconcile (`reconcile/positions.py`)
 
@@ -133,8 +136,16 @@ exist on only one side. Each joined row is tested against the rules below
 | 8 | Unexplained | Value differs, no rule matched |
 
 Order matters. A wrong currency also changes the dollar value, so it must be
-labelled Static Data before the FX rule sees it. Each break also gets a
-materiality band and a one-line likely cause. Tolerances live in `recon.yaml`.
+labelled Static Data before the FX rule sees it. Tolerances live in `recon.yaml`.
+
+Each break also gets:
+
+- a one-line **likely cause**, which also mentions a second difference the
+  label would hide (for example a quantity break where the price differs too);
+- an **exposure**: the dollar difference, except for an unprocessed corporate
+  action, where the values still agree but the whole position carries the wrong
+  quantity, so the position's value is used;
+- a **materiality** band from that exposure. Breaks are listed largest exposure first.
 
 ### 5. Metrics (`transform/`)
 

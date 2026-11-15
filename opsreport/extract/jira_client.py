@@ -165,8 +165,13 @@ class JiraClient:
     def search(
         self, jql: str, fields: list[str], page_size: int = 100
     ) -> Iterator[dict]:
-        """Yield every issue matching `jql`, following nextPageToken."""
+        """Yield every issue matching `jql`, following nextPageToken.
+
+        Keeps going while Jira hands back a token. Stopping early would
+        silently truncate the extract, so a missing `isLast` is not "last".
+        """
         token = None
+        seen: set[str] = set()
         while True:
             body: dict[str, Any] = {"jql": jql, "fields": fields, "maxResults": page_size}
             if token:
@@ -174,8 +179,12 @@ class JiraClient:
             page = self.post("/rest/api/3/search/jql", body)
             yield from page.get("issues", [])
             token = page.get("nextPageToken")
-            if page.get("isLast", True) or not token:
+            if page.get("isLast") is True or not token:
                 return
+            if token in seen:
+                raise JiraError("Jira search repeated a page token; stopping to avoid "
+                                "an endless loop")
+            seen.add(token)
 
 
 FIELD_LOCK = CONFIG_DIR / "jira_field_lock.yaml"

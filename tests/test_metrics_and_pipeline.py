@@ -77,6 +77,7 @@ def test_pipeline_end_to_end(tmp_path):
     assert wb.sheetnames == ["Summary", "Breaks", "AUM", "Ops SLA", "Overdue Tickets",
                              "Data Quality", "Run Info"]
     assert len(res.breaks) == 11
+    assert (res.breaks["materiality"] == "High").sum() == 4   # incl. the ASML split
     total = res.data.aum.set_index("fund_code").loc["TOTAL"]
     funds = res.data.aum[res.data.aum["fund_code"] != "TOTAL"]
     assert total["aum"] == pytest.approx(funds["aum"].sum())

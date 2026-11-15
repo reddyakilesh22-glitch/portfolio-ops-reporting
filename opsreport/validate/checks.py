@@ -50,8 +50,9 @@ def isin_is_valid(isin: str) -> bool:
 
 
 # ----------------------------------------------------------------- positions
-def check_positions(df: pd.DataFrame, fx: pd.Series) -> list[Issue]:
-    src = df["source"].iloc[0] if len(df) else "positions"
+def check_positions(df: pd.DataFrame, fx: pd.Series, label: str = "") -> list[Issue]:
+    """`label` is appended to the source name, e.g. "(prior week)"."""
+    src = (df["source"].iloc[0] if len(df) else "positions") + (f" {label}" if label else "")
     out: list[Issue] = []
 
     def rec(row) -> str:
@@ -66,6 +67,12 @@ def check_positions(df: pd.DataFrame, fx: pd.Series) -> list[Issue]:
     for row in dupes.drop_duplicates(["fund_code", "isin"]).itertuples():
         out.append(Issue(ERROR, src, "duplicate_position",
                          "same fund/ISIN appears more than once", rec(row)))
+
+    if "duplicate_lots" in df:
+        for row in df[df["duplicate_lots"].fillna(False).astype(bool)].itertuples():
+            out.append(Issue(ERROR, src, "duplicate_lot",
+                             "same fund/ISIN/location appears more than once in the "
+                             "statement; amounts would be double-counted", rec(row)))
 
     securities = df[~df["asset_class"].eq("Cash")]
     for row in securities[~securities["isin"].map(isin_is_valid)].itertuples():
@@ -119,6 +126,10 @@ def check_jira(df: pd.DataFrame) -> list[Issue]:
             out.append(Issue(WARNING, "jira", "unexpected_option",
                              f"{cfg[col]['name']} '{getattr(row, col)}' not in config",
                              row.key))
+
+    for row in df[df["due_date"].isna()].itertuples():
+        out.append(Issue(WARNING, "jira", "due_date_blank",
+                         "Due date blank; excluded from SLA and overdue counts", row.key))
 
     done = df["status_category"].eq("done")
     for row in df[done & df["resolved_business_date"].isna()].itertuples():

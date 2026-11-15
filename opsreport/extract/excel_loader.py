@@ -166,7 +166,7 @@ def load_custodian(as_of: date, path: Path | None = None) -> pd.DataFrame:
     out["as_of"] = as_of
     log.info("Custodian %s: %d positions (%d rows) across %d accounts",
              as_of, len(out), len(rows), len(frames))
-    return out[[*POSITION_COLUMNS, "lots", "locations"]]
+    return out[[*POSITION_COLUMNS, "lots", "locations", "duplicate_lots"]]
 
 
 LOT_KEYS = ["fund_code", "isin"]
@@ -179,6 +179,12 @@ def aggregate_lots(rows: pd.DataFrame, where: str = "custodian") -> pd.DataFrame
     Custodians may report a holding once per depository. Quantities and market
     values add; descriptive fields, price and FX rate must be identical across
     lots, otherwise the file is inconsistent and the run stops.
+
+    Two things must NOT be hidden by adding rows together:
+    - a blank amount: the total stays blank (a plain sum would treat it as 0),
+      so the required-field check still fires;
+    - the same fund, ISIN and location twice: that is a duplicated row, not a
+      second lot. It is flagged in `duplicate_lots` for the data-quality check.
     """
     g = rows.groupby(LOT_KEYS, sort=False, dropna=False)
     disagree = [c for c in LOT_MUST_AGREE if (g[c].nunique(dropna=False) > 1).any()]
@@ -189,13 +195,21 @@ def aggregate_lots(rows: pd.DataFrame, where: str = "custodian") -> pd.DataFrame
                               f"for {bad[:5]}")
     if "locations" not in rows:
         rows = rows.assign(locations=pd.NA)
+    rows = rows.assign(
+        _dup=rows.duplicated([*LOT_KEYS, "locations"], keep=False))  # NaN == NaN here
+    g = rows.groupby(LOT_KEYS, sort=False, dropna=False)
+
+    def strict_sum(s: pd.Series) -> float:
+        return s.sum(skipna=False)
+
     out = g.agg(
         **{c: (c, "first") for c in LOT_MUST_AGREE},
-        quantity=("quantity", "sum"),
-        local_mv=("local_mv", "sum"),
-        base_mv=("base_mv", "sum"),
+        quantity=("quantity", strict_sum),
+        local_mv=("local_mv", strict_sum),
+        base_mv=("base_mv", strict_sum),
         lots=("isin", "size"),
         locations=("locations", lambda s: "+".join(s.dropna().astype(str)) or pd.NA),
+        duplicate_lots=("_dup", "any"),
     ).reset_index()
     split = out[out["lots"] > 1]
     if len(split):
@@ -249,9 +263,10 @@ def load_fx(as_of: date, path: Path | None = None) -> pd.Series:
     return rates
 
 
-def load_all(as_of: date) -> dict[str, pd.DataFrame | pd.Series]:
+def load_all(as_of: date, raw_dir: Path = RAW_DIR) -> dict[str, pd.DataFrame | pd.Series]:
+    """Load the three workbooks for `as_of` from `raw_dir/<as_of>/`."""
     return {
-        "custodian": load_custodian(as_of),
-        "accounting": load_accounting(as_of),
-        "fx": load_fx(as_of),
+        "custodian": load_custodian(as_of, source_path("custodian", as_of, raw_dir)),
+        "accounting": load_accounting(as_of, source_path("accounting", as_of, raw_dir)),
+        "fx": load_fx(as_of, source_path("fx", as_of, raw_dir)),
     }

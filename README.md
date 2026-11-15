@@ -124,7 +124,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 |---|---|
 | `--as-of DATE` | The Friday being reported |
 | `--prior DATE` | The previous Friday, for week-over-week change |
-| `--jira live` | Pull tickets from Jira now (needs `.env`, see below) instead of the saved copy |
+| `--jira live` | Pull tickets from Jira now (needs `.env`, see below) instead of the saved copy. Refuses to replace an existing saved copy unless you add `--refresh-snapshot` |
+| `--raw-dir DIR` | Read the input files from another folder (default `data/raw`) |
 | `--commentary local-llm` | Have a local AI model write the summary; see [AI commentary](docs/AI_COMMENTARY.md) |
 | `--allow-errors` | Produce a report even when checks fail. For investigation only |
 
@@ -158,7 +159,7 @@ opsreport/        the application
 config/           settings: column names, tolerances, holidays, funds
 data/             sample input files, saved Jira data, answer keys for tests
 scripts/          helpers that create the sample data and Jira project
-tests/            89 automated tests
+tests/            automated tests
 docs/             the documents listed below
 ```
 
