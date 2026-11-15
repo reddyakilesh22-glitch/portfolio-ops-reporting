@@ -32,6 +32,20 @@ CASES = [
     ("Total AUM was $352.0M.", False),                     # invented
     ("There are 19 overdue tickets.", False),              # 19 is open, not overdue
     ("OPSREC-999 is the oldest ticket.", False),           # ticket doesn't exist
+    # audit D (#17): direction, swapped subjects, unsupported claims
+    ("Total AUM rose $1.5M week over week.", False),        # it fell
+    ("Total AUM increased 0.4% week over week.", False),    # it fell; +0.4% is USCB
+    ("GEF fell 4.3% while ISC rose 1.3% week over week.", False),   # swapped
+    ("ISC rose 4.3% week over week.", False),               # right fund, wrong direction
+    ("Reconciliation breaks total $14.9M, which is immaterial and needs no action.",
+     False),
+    ("The $8.4M GEF NVDA break was caused by a custodian system outage.", False),
+    ("Total AUM fell 0.4% due to market movements.", False),
+    # real llama3.2 output that an earlier version of the checker accepted
+    ("There are 19 open ops tickets, with 12 of them past SLA, totaling 35 business "
+     "days of delay.", False),                              # 35 = oldest ticket's age
+    ("All should be addressed to meet the 40% SLA met this week target.", False),
+    ("The largest materiality break is the $3.4M ISC 4385 missing trade.", False),
     # --- must be accepted
     ("Reconciliation breaks total $14.9M across all funds, with a high-materiality "
      "break count of 4 and missing trade breaks affecting GEF NVDA ($8.4M) and "
@@ -46,6 +60,15 @@ CASES = [
      "of $8.4M.", True),
     ("Data quality shows 0 errors and 7 warnings, including a stale BRL rate "
      "(-3.00%) on 2 positions.", True),
+    ("GEF rose 1.3% while ISC fell 4.3% week over week.", True),
+    ("The oldest open ticket is 35 business days old.", True),
+    ("The second-largest break is the $3.4M ISC 4385 missing trade.", True),
+    ("The largest break is the $8.4M GEF NVDA missing trade.", True),
+    ("USCB rose 0.4% week over week.", True),               # +0.4% USCB, not the total
+    ("Global Equity Fund AUM is $79.4M, up 1.3% week over week.", True),
+    ("Total AUM fell $1.5M, a decline of 0.4% week over week.", True),
+    ("The $8.4M GEF NVDA missing trade is likely due to a failed or pending "
+     "settlement at the custodian.", True),                 # cause is in the facts
 ]
 
 
@@ -127,3 +150,12 @@ def test_pipeline_records_commentary_source_and_audit(tmp_path):
     info = dict(zip(res.data.run_info["item"], res.data.run_info["value"], strict=True))
     assert info["commentary"].startswith("llm:")
     assert (tmp_path / "2026-11-13" / "commentary_audit_20261113.json").exists()
+
+
+# ---- audit D: the template is true by construction, so it must always pass ----
+@pytest.mark.parametrize("as_of, prior", [(AS_OF, PRIOR), (PRIOR, None), (AS_OF, None)])
+def test_template_commentary_always_passes_the_guardrail(tmp_path, as_of, prior):
+    from opsreport.report.excel_report import default_commentary
+    d = run(as_of, prior, out_dir=tmp_path).data
+    verdict = ai.verify(default_commentary(d), ai.build_facts(d))
+    assert verdict.ok, verdict.problems

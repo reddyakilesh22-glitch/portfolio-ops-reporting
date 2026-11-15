@@ -65,6 +65,9 @@ class Fact:
     value: str               # pre-formatted value, e.g. "$14.9M", "7", "-0.4%"
     must: frozenset[str]     # stems; at least one must appear next to the number
     exclude: frozenset[str] = frozenset()   # qualifiers that must NOT be near it
+    direction: str = ""      # "up" / "down" for a change; "" when not a change
+    rank: int = 0            # 1 = the largest of its kind, 2 = second, ...; 0 = n/a
+    hidden: bool = False     # checked against, but not shown to the model as a fact
 
 
 @dataclass
@@ -75,7 +78,7 @@ class FactSheet:
 
     @property
     def text(self) -> str:
-        return "\n".join([f"- {f.label}: {f.value}" for f in self.facts]
+        return "\n".join([f"- {f.label}: {f.value}" for f in self.facts if not f.hidden]
                          + [f"- {n}" for n in self.notes])
 
     @property
@@ -98,8 +101,12 @@ def build_facts(d) -> FactSheet:
     entities: set[str] = set()
     notes: list[str] = [f"Report date: {d.as_of:%d %B %Y}"]
 
-    def add(label: str, value: str, *must: str, exclude: tuple[str, ...] = ()) -> None:
-        facts.append(Fact(label, value, _stems(*must), _stems(*exclude)))
+    def add(label: str, value: str, *must: str, exclude: tuple[str, ...] = (),
+            change: float | None = None, rank: int = 0) -> None:
+        """`change` = the signed amount, for facts that are a rise or a fall.
+        `rank` = position among the largest breaks (1 = largest)."""
+        direction = "" if not change or pd.isna(change) else "up" if change > 0 else "down"
+        facts.append(Fact(label, value, _stems(*must), _stems(*exclude), direction, rank))
 
     change_words = ("change", "changed", "down", "up", "fell", "rose", "decline",
                     "declined", "increase", "increased", "decrease", "decreased",
@@ -108,14 +115,16 @@ def build_facts(d) -> FactSheet:
     total = aum.loc["TOTAL"]
     add("Total AUM", money(total["aum"]), "aum", "assets")
     if "aum_change" in aum:
-        add("Total AUM change vs prior week", money(total["aum_change"]), *change_words)
+        add("Total AUM change vs prior week", money(total["aum_change"]), *change_words,
+            change=total["aum_change"])
         add("Total AUM change vs prior week (%)", pct(total["aum_change_pct"], True),
-            *change_words)
+            *change_words, change=total["aum_change"])
         for code, row in aum.drop(index="TOTAL").iterrows():
             entities |= {code, row["fund_name"]}
-            add(f"{code} ({row['fund_name']}) AUM", money(row["aum"]), f"<{code}>")
+            fund = (f"<{code}>", f"<{row['fund_name']}>")     # code or full name
+            add(f"{code} ({row['fund_name']}) AUM", money(row["aum"]), *fund)
             add(f"{code} ({row['fund_name']}) AUM week-over-week change",
-                pct(row["aum_change_pct"], True), f"<{code}>")
+                pct(row["aum_change_pct"], True), *fund, change=row["aum_change_pct"])
 
     b = d.breaks
     add("Reconciliation breaks (count)", str(len(b)), "breaks", "break")
@@ -128,10 +137,12 @@ def build_facts(d) -> FactSheet:
         "high")
     for t, n in b["break_type"].value_counts().items():
         add(f"{t} breaks (count)", str(n), t.split()[0].lower())  # distinctive word
-    for _, r in b.nlargest(3, "abs_base_mv_diff").iterrows():
+    ordinal = ["Largest", "Second-largest", "Third-largest"]
+    for i, (_, r) in enumerate(b.nlargest(3, "abs_base_mv_diff").iterrows()):
         entities |= {r["fund_code"], str(r["ticker"])}
-        add(f"Large break {r['fund_code']} {r['ticker']} ({r['break_type']}), absolute "
-            "difference", money(r["abs_base_mv_diff"]), f"<{r['ticker']}>")
+        add(f"{ordinal[i]} break by absolute difference: {r['fund_code']} {r['ticker']} "
+            f"({r['break_type']})", money(r["abs_base_mv_diff"]), f"<{r['ticker']}>",
+            rank=i + 1)
         notes.append(f"Likely cause for {r['fund_code']} {r['ticker']}: "
                      + re.sub(r"\s*\([^)]*\d[^)]*\)", "", r["likely_cause"]))
 
@@ -140,11 +151,17 @@ def build_facts(d) -> FactSheet:
     add("Ops tickets past SLA", str(k["overdue_tickets"]), "past", "overdue", "late",
         "breach", "breached")
     add("Oldest open ticket age (business days)", str(k["oldest_open_bdays"]), "oldest",
-        "old", "days", "aged")
-    add("SLA met this week", pct(k["sla_met_this_week"]), "this", "week", "weekly")
+        "old", "aged")   # not "days": a unit doesn't say what is being measured
+    not_a_target = ("target", "goal", "threshold", "objective")   # these are actuals
+    add("SLA met this week", pct(k["sla_met_this_week"]), "this", "week", "weekly",
+        exclude=not_a_target)
     add("SLA met over the last 4 weeks", pct(k["sla_met_4wk"]), "last", "four", "weeks",
-        "month", "trailing", "rolling")
-    add("Look-back window for SLA (weeks)", "4", "last", "weeks", "week")
+        "month", "trailing", "rolling", exclude=not_a_target)
+    # The "4" in "last 4 weeks" is part of a label, not a finding. It must be
+    # accepted when the model repeats the label, but listing it as a fact
+    # invites the model to compare other numbers against it.
+    facts.append(Fact("SLA look-back window (weeks)", "4", _stems("last", "weeks", "week"),
+                      hidden=True))
     if len(d.jira_by_team):
         top = d.jira_by_team.iloc[0]
         entities.add(top["ops_team"])
@@ -189,7 +206,20 @@ _WORD_NUMS = {w: str(i) for i, w in enumerate(
 _STOP = set("a an and are as at be by for from has have in is it its of on or "
             "the this that to was were which with".split()) - {"this"}
 _WINDOW = 4
-_TAG = "ent"   # prefix of entity placeholders
+_TAG = "zq"    # prefix of entity placeholders; no English word starts with it
+_UP = frozenset(w[:5] for w in "rose rise rises risen up increase increased higher grew "
+                "grow gain gained climbed growth".split())
+_DOWN = frozenset(w[:5] for w in "fell fall falls fallen down decline declined decrease "
+                  "decreased lower dropped drop lost loss shrank".split())
+_SUPERLATIVE = frozenset({"large", "bigge", "top", "highe", "great", "worst"})
+_ORDINAL = frozenset({"secon", "third"})
+# Judgements that play a problem down, and phrases that assert a cause.
+_DISMISSIVE = re.compile(
+    r"\b(immaterial|not material|negligible|insignificant|no (?:further )?action|"
+    r"can be ignored|not a concern|no concern|nothing to worry|acceptable)\b", re.I)
+_CAUSAL = re.compile(
+    r"\b(caused by|due to|because(?: of)?|as a result of|owing to|stems? from|"
+    r"attributed to|driven by)\b", re.I)
 _CLAUSE = re.compile(r"[,;()]|\b(?:and|while|but|with|whereas)\b", re.I)
 
 
@@ -206,6 +236,8 @@ class Num:
     near: tuple[tuple[str, int], ...] = ()   # (stem, word distance), same sentence
     sentence: frozenset[str] = frozenset()   # every stem in the sentence
     clause: tuple[tuple[str, int], ...] = ()  # like `near`, within the clause only
+    clause_tags: frozenset[str] = frozenset()  # entity placeholders in the clause
+    clause_words: frozenset[str] = frozenset()  # every stem in the clause
 
     def dist(self, stems: frozenset[str]) -> int | None:
         """Closest distance of any of `stems` to this number, or None.
@@ -261,9 +293,12 @@ def extract_numbers(text: str, tags: dict[str, str] | None = None) -> list[Num]:
             hi = min([b for b in cuts if b >= m.end()], default=len(sentence))
             clause = tuple((w, d) for w, d in near
                            if any(lo <= s0 < hi and ww == w for s0, _, ww in words))
+            in_clause = frozenset(w for s0, _, w in words if lo <= s0 < hi)
+            tags_here = frozenset(w for w in in_clause if w.startswith(_TAG))
             out.append(Num(-val if m.group("neg") else val, unit == "%",
                            scale * 10 ** -decimals, m.group(0).strip(), near,
-                           frozenset(w for _, _, w in words), clause))
+                           frozenset(w for _, _, w in words), clause, tags_here,
+                           in_clause))
     return out
 
 
@@ -278,21 +313,92 @@ def _same_value(a: Num, n: Num) -> bool:
         abs(abs(a.value) - abs(n.value)) <= max(n.step, a.step) / 2 + 1e-9
 
 
+def _fit(n: Num, fact: Fact, must: dict[Fact, frozenset[str]],
+         parsed: list[tuple[Fact, Num]]) -> tuple[int, str]:
+    """Does this number, as written, fit this fact? Returns (rank, problem);
+    an empty problem means it fits. Rank orders problems by how close the fit
+    was, so the most useful one is reported."""
+    keys = must[fact]
+    this = f"{fact.label} = {fact.value}"
+
+    if fact.exclude & n.clause_words:
+        return 2, f"'{n.raw}' is described with a qualifier the fact doesn't have; fact: {this}"
+
+    if fact.rank > 1 and n.clause_words & _SUPERLATIVE and not n.clause_words & _ORDINAL:
+        return 2, f"'{n.raw}' is called the largest but it is not; fact: {this}"
+
+    subjects = {w for w in keys if w.startswith(_TAG)}
+    if subjects and n.clause_tags and not subjects & n.clause_tags:
+        return 2, f"'{n.raw}' is attached to a different subject; fact: {this}"
+
+    d = n.dist(keys)
+    if d is None:
+        return 1, f"'{n.raw}' is not next to what it measures; fact: {this}"
+
+    if n.is_count and n.clause_dist(keys) is None:
+        # Its own label isn't in the clause but another count's is: mislabelled
+        # ("... most overdue tickets is Reconciliation with 7 open tickets").
+        rivals = [(rd, f) for f, v in parsed
+                  if v.is_count and not _same_value(v, n)
+                  and (rd := n.clause_dist(must[f])) is not None and rd < d]
+        if rivals:
+            other = min(rivals, key=lambda x: x[0])[1]
+            return 3, (f"'{n.raw}' sits next to '{other.label}' (= {other.value}); "
+                       f"fact: {this}")
+
+    if fact.direction:
+        said = {w for w, _ in n.clause}
+        wrong, right = (_UP, _DOWN) if fact.direction == "down" else (_DOWN, _UP)
+        if (said & wrong and not said & right) or (n.value < 0 and fact.direction == "up"):
+            return 4, f"'{n.raw}' is described as going the wrong way; fact: {this}"
+    return 5, ""
+
+
+def _unsupported_claims(bullet: str, facts: FactSheet) -> list[str]:
+    """Judgements and causes can't be traced to a number, so they are checked
+    as text: nothing may be played down, and a stated cause must echo a
+    'likely cause' the facts actually give."""
+    problems = []
+    if m := _DISMISSIVE.search(bullet):
+        problems.append(f"'{m.group(0)}' is a judgement the facts don't support")
+    for sentence in re.split(r";|\.(?:\s|$)", bullet):
+        if not (m := _CAUSAL.search(sentence)):
+            continue
+        claim = {w.lower()[:5] for w in re.findall(r"[A-Za-z]+", sentence[m.end():])
+                 if w.lower() not in _STOP}
+        known = [{w.lower()[:5] for w in re.findall(r"[A-Za-z]+", note)}
+                 for note in facts.notes if "cause" in note.lower()]
+        if not any(len(claim & k) >= 2 for k in known):
+            problems.append(f"'{m.group(0)} ...' states a cause that is not in the facts")
+    return problems
+
+
 def verify(draft: list[str], facts: FactSheet) -> Verdict:
     """Fact-check a draft against the fact sheet.
 
-    Each number (digits, or one..twenty spelled out) must
-      1. equal some fact's value, allowing rounding and a dropped sign, and
-      2. be *bound* to that fact: one of the fact's keywords (or its entity)
-         must appear within a few words of the number in the same sentence.
-    For counts whose own keyword isn't in the same clause, a different count's
-    keyword must not be closer: "... most overdue tickets is Reconciliation with
-    7 open tickets" fails when 7 is the overdue count. All-breaks totals reject
-    subset qualifiers ("3 high-materiality breaks totaling $14.9M").
-    Ticket keys must exist; bullet count must be within limits.
+    Each number (digits, or one..twenty spelled out) must equal some fact's
+    value, allowing rounding and a dropped sign, and must *fit* at least one
+    such fact (see `_fit`):
+      - a keyword of the fact is within a few words, or its entity (fund,
+        ticker) is in the sentence;
+      - if the number's clause names an entity, it is the fact's entity, so
+        "GEF fell 4.3% while ISC rose 1.3%" fails when the figures are swapped;
+      - a count isn't sitting beside another count's label ("7 open" when 7 is
+        the overdue count);
+      - an all-breaks total isn't given a subset qualifier ("3 high-materiality
+        breaks totaling $14.9M"), and an actual isn't called a target;
+      - only the largest break is called the largest;
+      - a change isn't described as going the wrong way ("rose" for a fall).
+    The same value can belong to two facts (-0.4% total, +0.4% one fund), which
+    is why fitting any one of them is enough.
 
-    Known limit: binding is word proximity, not meaning. It catches invented and
-    mislabelled numbers, not every misleading sentence; the analyst still
+    Beyond numbers: ticket keys must exist, the bullet count must be within
+    limits, nothing may be played down ("immaterial"), and a stated cause must
+    echo a likely cause from the facts.
+
+    Known limit: this is word proximity and phrase lists, not understanding. It
+    catches invented, mislabelled and misdirected numbers and the commonest
+    unsupported claims, not every misleading sentence; the analyst still
     reviews the draft before sending.
     """
     problems: list[str] = []
@@ -311,32 +417,11 @@ def verify(draft: list[str], facts: FactSheet) -> Verdict:
             if not same:
                 problems.append(f"'{n.raw}' is not a value in the facts")
                 continue
-            same = [f for f in same if n.clause_dist(f.exclude) is None] or same
-            qualified = all(n.clause_dist(f.exclude) is not None for f in same)
-            d_match = [d for f in same if (d := n.dist(must[f])) is not None
-                       and not qualified]
-            if qualified:
-                problems.append(f"'{n.raw}' is described with a qualifier the fact "
-                                f"doesn't have; facts: "
-                                + " | ".join(f"{f.label} = {f.value}" for f in same))
-                continue
-            if not d_match:
-                problems.append(f"'{n.raw}' is not next to what it measures; facts: "
-                                + " | ".join(f"{f.label} = {f.value}" for f in same))
-                continue
-            own_in_clause = any(n.clause_dist(must[f]) is not None for f in same)
-            if n.is_count and not own_in_clause:
-                # The number's own label isn't in its clause, but a different
-                # count's label is: probably mislabelled ("... most overdue tickets
-                # is Reconciliation with 7 open tickets" when 7 is the overdue count).
-                rivals = [(d, f) for f, v in parsed if v.is_count and f not in same
-                          and (d := n.clause_dist(must[f])) is not None
-                          and d < min(d_match)]
-                if rivals:
-                    f = min(rivals, key=lambda x: x[0])[1]
-                    problems.append(f"'{n.raw}' sits next to '{f.label}' "
-                                    f"(= {f.value}); facts: "
-                                    + " | ".join(f"{g.label} = {g.value}" for g in same))
+            rank, problem = max((_fit(n, f, must, parsed) for f in same),
+                                key=lambda r: r[0])
+            if problem:
+                problems.append(problem)
+        problems += _unsupported_claims(bullet, facts)
     for key in set(re.findall(r"\b[A-Z]+-\d+\b", "\n".join(draft))) - facts.entities:
         problems.append(f"ticket '{key}' is not in the facts")
     return Verdict(not problems, problems)
