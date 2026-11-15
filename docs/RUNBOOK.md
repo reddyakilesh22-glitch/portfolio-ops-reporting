@@ -69,6 +69,7 @@ unexpected error (a bug): open an issue with the log attached.
 | `Custom field mapping failed` | Jira field renamed/deleted | See Incident INC-001 in `docs/INCIDENTS.md` |
 | `Jira ... 401` | API token expired or revoked | Create a new token, update `.env`, never paste it in chat or tickets |
 | `Jira ... 429` (repeated) | Rate limiting | The client retries automatically; if it still fails, re-run later |
+| `Holiday calendar ... has no entries for [YYYY]` | New year not added to the calendar | Add the exchange's published closures to `config/calendar.yaml` (PR) |
 | `No Jira snapshot on/after` | Running offline for a week with no snapshot | Run with `--jira live` |
 
 ### DQ errors (exit 2)
@@ -102,5 +103,6 @@ without saying so.
 | Source layouts (Excel) | `config/excel_layouts.yaml` |
 | Funds and custodian accounts | `config/funds.yaml` |
 | Tolerances, materiality | `config/recon.yaml` |
+| Business-day calendar | `config/calendar.yaml` (update each December) |
 | Credentials | `.env` (never committed); template `.env.example` |
 | Planted-break answer keys (tests) | `data/expected/` |
