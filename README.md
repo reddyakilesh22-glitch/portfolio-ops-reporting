@@ -1,113 +1,186 @@
 # Portfolio Ops Reporting
 
-Weekly operations report for an asset manager: reconciliation breaks between
-the custodian and fund accounting, AUM by fund, and SLA metrics for the ops
-tickets that track those breaks in Jira.
+A Python pipeline that checks an investment firm's two records of what its
+funds own against each other, and produces the weekly report on every
+mismatch, the funds' total value, and how quickly mismatches are being fixed.
 
-> Self-directed project modeling a financial-services reporting workflow.
-> All data is synthetic.
+> A self-directed project modelling a real reporting workflow in asset
+> management. All data is synthetic.
 
-## Status
+**New to this industry?** Start with [docs/CONCEPTS.md](docs/CONCEPTS.md): the
+business explained with everyday analogies and a glossary.
 
-| Stage | State |
+## The problem, in plain English
+
+An investment firm runs **funds**: pools of investors' money. Two parties each
+keep a record of what every fund owns:
+
+- The **custodian**: the bank that actually holds the fund's shares, bonds and
+  cash for safekeeping. (Custodian means "has custody of the assets". It is not
+  a customer.)
+- **Fund accounting**: the firm's own official books, where every trade is
+  recorded as soon as it is made.
+
+It works like checking your own budgeting spreadsheet against your bank
+statement. The two should match. When they don't, the difference is called a
+**break**, and it must be found, explained and fixed, because the fund's value
+reported to investors is calculated from those books.
+
+## Pain points this solves
+
+| Without this | With this |
 |---|---|
-| Jira extract (REST v3, `search/jql` paging, name-based field mapping) | done |
-| Excel extract (custodian, fund accounting, FX workbooks) | done |
-| Validation, reconciliation, AUM, Jira SLA metrics, Excel report | done |
-| Runbook + 4 incidents fixed via issue -> test -> PR | done |
-| AI commentary (local LLM) with numeric guardrails | done |
+| Someone compares two big spreadsheets by hand every week | One command compares every holding in under a second |
+| The bank's file layout changes and values land in the wrong column unnoticed | Columns are matched by name; an unexpected layout stops the run with a clear message |
+| A missing row quietly shrinks the total | Rows read must add up to the total printed on the bank's statement |
+| "They don't match" with no idea why | Each break is labelled with a type and a likely cause |
+| Nobody knows which task tickets are late | Open, overdue and on-time rates per team, pulled from Jira |
+| Last week's numbers change when re-run | Inputs are fingerprinted and Jira pulls are saved |
+| An upstream change breaks the script at 7am | A runbook maps each error message to a cause and an action |
 
-## Operations
+## How it works, end to end
 
-- [Runbook](docs/RUNBOOK.md): weekly checklist, re-runs, troubleshooting by error message
-- [Incident log](docs/INCIDENTS.md): what broke, root cause, fix, and the PR for each
-- [AI commentary](docs/AI_COMMENTARY.md): design, guardrail rules, what it caught, limits
+```mermaid
+flowchart LR
+    subgraph IN["1 Inputs"]
+        C["Custodian holdings<br/>the bank's record, Excel"]
+        A["Fund accounting positions<br/>our own books, Excel"]
+        F["FX rates<br/>Excel"]
+        J["Ops tickets<br/>Jira API"]
+    end
 
-## Run the weekly report
+    subgraph CHECK["2 Load and check"]
+        L["Read and clean<br/>the files"]
+        V{"Data<br/>trustworthy?"}
+    end
 
-```bash
-python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06            # offline (Jira snapshot)
-python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06 --jira live  # pull Jira, save snapshot
-python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06 --commentary local-llm  # AI draft
+    subgraph CALC["3 Calculate"]
+        R["Reconcile:<br/>compare the two records"]
+        M["Fund values (AUM) and<br/>ticket deadlines (SLA)"]
+    end
+
+    subgraph OUT["4 Output"]
+        X["Excel report<br/>7 tabs"]
+    end
+
+    C --> L
+    A --> L
+    F --> L
+    J --> L
+    L --> V
+    V -->|"no"| S["Stop and say<br/>exactly what is wrong"]
+    V -->|"yes"| R
+    R --> M
+    M --> X
+    M -.->|"optional"| AI["AI writes the summary,<br/>every number is fact-checked"]
+    AI -.-> X
 ```
 
-`--commentary local-llm` drafts the Summary commentary with a local model via
-[Ollama](https://ollama.com) (`ollama pull llama3.2`). Every number in the draft is
-checked against the report; failures retry once, then fall back to the template.
-See [docs/AI_COMMENTARY.md](docs/AI_COMMENTARY.md).
+1. **Inputs.** Three Excel files arrive for the Friday being reported, plus
+   the ops team's task tickets from Jira.
+2. **Load and check.** The files are read and cleaned (the bank's file is
+   messy on purpose, like real ones). Checks run before any number is trusted.
+   If something is seriously wrong, the run stops instead of publishing.
+3. **Calculate.** Every holding is compared between the two records. Each
+   difference becomes a break with a type and a likely cause. Fund totals and
+   ticket deadline statistics are computed.
+4. **Output.** One Excel workbook, ready to send.
 
-Writes `output/<date>/portfolio_ops_report_<yyyymmdd>.xlsx` plus `breaks_*.csv`,
-`data_quality_*.csv`, and `output/run.log`. Exit code 2 = data-quality ERROR
-(nothing published; re-run with `--allow-errors` to force).
+The step-by-step technical version, with a module map, is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-**Pipeline:** extract (Excel + Jira) -> validate -> reconcile -> AUM / SLA metrics -> report
+## What comes out
 
-| Report tab | Contents |
+`output/<date>/portfolio_ops_report_<yyyymmdd>.xlsx`
+
+| Tab | What it tells you |
 |---|---|
-| Summary | KPI tiles, commentary, AUM by fund with week-over-week change, breaks by type |
-| Breaks | Every custodian vs accounting break with type, materiality, likely cause |
-| AUM | Securities MV, cash, accrued income, AUM, custodian comparison, chart |
-| Ops SLA | Open/overdue by team, aging buckets, 8-week trend chart |
-| Overdue Tickets | Open Jira tickets past SLA, oldest first |
-| Data Quality | Every ERROR / WARNING with the record it applies to |
-| Run Info | Inputs with SHA-256, row counts, git commit, versions (audit trail) |
+| Summary | Headline numbers, a short commentary, value of each fund and its weekly change |
+| Breaks | Every mismatch: which fund, which security, what kind, how big, likely cause |
+| AUM | Each fund's total value, with the bank's figure alongside |
+| Ops SLA | Per team: open tickets, late tickets, how old, share fixed on time; 8-week trend |
+| Overdue Tickets | The late tickets, oldest first |
+| Data Quality | Every problem found in the inputs |
+| Run Info | Audit trail: exactly which files and code version produced this report |
 
-## Setup
+For the sample week (13 Nov 2026): 5 funds worth $350.2M, 11 breaks adding up
+to $14.9M, 19 open tickets of which 12 are late.
+
+## Try it
 
 ```bash
+git clone https://github.com/reddyakilesh22-glitch/portfolio-ops-reporting.git
+cd portfolio-ops-reporting
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-cp .env.example .env              # fill in Jira URL, email, API token
-python -m scripts.jira_setup      # company-managed project + custom fields (idempotent)
-python -m scripts.seed_jira       # 160 synthetic break tickets (--reset to reseed)
-python -m scripts.generate_excel_data   # synthetic workbooks + answer keys (already committed)
-pytest -q                         # offline; no Jira credentials needed
+
+# Build the sample report. Works offline: sample data is included.
+.venv/bin/python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06
+
+# Run the tests
+.venv/bin/pytest -q
 ```
 
-## Jira design notes
+| Option | What it does |
+|---|---|
+| `--as-of DATE` | The Friday being reported |
+| `--prior DATE` | The previous Friday, for week-over-week change |
+| `--jira live` | Pull tickets from Jira now (needs `.env`, see below) instead of the saved copy |
+| `--commentary local-llm` | Have a local AI model write the summary; see [AI commentary](docs/AI_COMMENTARY.md) |
+| `--allow-errors` | Produce a report even when checks fail. For investigation only |
 
-- **Field mapping by name, not id.** `config/jira_fields.yaml` maps logical names
-  to Jira display names; ids (`customfield_XXXXX`) are resolved at runtime. A
-  renamed or missing field stops the run with a clear error instead of producing
-  empty columns. Old names can be kept under `aliases`.
-- **Enhanced search endpoint.** Uses `POST /rest/api/3/search/jql` with
-  `nextPageToken`; the legacy `/rest/api/3/search` was retired by Atlassian.
-- **Business dates.** Jira won't back-date `created`/`resolutiondate`, so break
-  history uses `Business Date` / `Resolved Business Date`. Timestamps are
-  normalized to UTC.
-- **Retries.** 429/5xx responses are retried, honoring `Retry-After`.
+The program ends with exit code **0** (report written), **1** (a file, Jira or
+setup problem) or **2** (the data failed its checks; nothing published).
 
-## Source files (`data/raw/<date>/`)
+<details>
+<summary>Connecting your own Jira site (optional)</summary>
 
-| File | Mimics | Traps the loader handles |
-|---|---|---|
-| `custodian_holdings_*.xlsx` | Custodian bank holdings statement, one sheet per fund account | Title rows above the header, numbers stored as text, trailing spaces in ISINs, lowercase currency codes, Total row and footer |
-| `fund_accounting_positions_*.xlsx` | Fund accounting system extract | Different column names, separate accrued income, its own FX rates |
-| `fx_rates_*.xlsx` | 4pm closing FX rates (units per USD) | Missing or duplicate currencies |
+```bash
+cp .env.example .env              # add your Jira URL, email and API token
+python -m scripts.jira_setup      # creates the demo project and custom fields
+python -m scripts.seed_jira       # adds 160 synthetic tickets
+```
 
-`data/expected/breaks_<date>.csv` is the answer key of breaks planted between
-custodian and accounting (quantity, price, missing trade, corporate action, FX,
-cash, static data). Tests assert the reconciliation finds exactly these.
+`.env` is never committed. The synthetic Excel files can be regenerated with
+`python -m scripts.generate_excel_data`.
+</details>
 
-## Excel design notes
+## Project layout
 
-- **Header-name matching.** Columns map by header text (`config/excel_layouts.yaml`),
-  so an inserted column can't shift values; a renamed column fails with the list
-  of headers actually present.
-- **Header row discovery.** The custodian header row is found by scanning for `ISIN`.
-- **Date guard.** Each file's internal as-of date must match the run date.
-- **Control total.** Loaded custodian market value must tie to the statement's own
-  Total row within $1, so dropped or mis-parsed rows stop the run.
+```
+opsreport/        the application
+  extract/        read the Excel files and Jira
+  validate/       data-quality checks
+  reconcile/      compare the two records, classify breaks
+  transform/      fund values (AUM) and ticket statistics
+  report/         write the Excel workbook
+  ai/             optional AI summary and its fact-checker
+  pipeline.py     runs the steps in order
+config/           settings: column names, tolerances, holidays, funds
+data/             sample input files, saved Jira data, answer keys for tests
+scripts/          helpers that create the sample data and Jira project
+tests/            89 automated tests
+docs/             the documents listed below
+```
 
-## Reconciliation and metrics design notes
+## Documentation
 
-- **Classification order.** Missing trade -> cash -> static data -> corporate action ->
-  quantity -> price -> FX -> unexplained. Order matters: a currency mismatch also
-  moves base MV, so it must be caught as static data before the FX rule.
-- **Quantity and value are checked separately.** A 2:1 split shows ~$0 MV difference;
-  only the quantity check catches it.
-- **Answer-key tests.** The reconciliation must return exactly the planted breaks
-  for both dates: no misses, no false positives, and sub-tolerance rounding ignored.
-- **Point-in-time SLA metrics.** "Open as of D" uses business dates, so re-running a
-  past week reproduces what was reported that week.
-- **Offline reproducibility.** Every live Jira pull saves a sanitized snapshot
-  (no site URLs or account ids); runs default to the snapshot.
+| Document | Read it for |
+|---|---|
+| [CONCEPTS.md](docs/CONCEPTS.md) | The business in plain English, worked examples, glossary |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the code works: detailed flow, each stage, rules, tests |
+| [RUNBOOK.md](docs/RUNBOOK.md) | Running it each week and what to do when it fails |
+| [INCIDENTS.md](docs/INCIDENTS.md) | Four things that broke, why, and how each was fixed |
+| [AI_COMMENTARY.md](docs/AI_COMMENTARY.md) | How the AI summary is kept honest |
+
+## Built with
+
+Python 3.11, pandas, openpyxl and XlsxWriter (Excel), requests (Jira REST
+API), pytest and ruff, GitHub Actions for CI, and optionally Ollama for a
+local language model.
+
+## Limits
+
+This is a learning project, not production software. The data is synthetic,
+fund value is simplified to total assets, one holiday calendar is used for
+all markets, and the AI fact-checker catches wrong numbers, not every
+misleading sentence.
