@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import platform
 import subprocess
@@ -13,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from opsreport import __version__
+from opsreport.ai import commentary as commentary_mod
 from opsreport.calendar import is_business_day
 from opsreport.config import ROOT
 from opsreport.extract import excel_loader
@@ -23,7 +25,7 @@ from opsreport.extract.jira_client import (
     snapshot_to_frame,
 )
 from opsreport.reconcile.positions import reconcile, summarize
-from opsreport.report.excel_report import ReportData, write_report
+from opsreport.report.excel_report import ReportData, default_commentary, write_report
 from opsreport.transform import aum as aum_mod
 from opsreport.transform import jira_metrics as jm
 from opsreport.validate.checks import (
@@ -88,7 +90,8 @@ def resolve_snapshot(as_of: date, explicit: Path | None) -> Path:
 
 def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
         snapshot: Path | None = None, out_dir: Path = OUTPUT_DIR,
-        allow_errors: bool = False) -> RunResult:
+        allow_errors: bool = False, commentary: str = "template",
+        model: str = commentary_mod.DEFAULT_MODEL) -> RunResult:
     started = datetime.now()
     log.info("Run start: as_of=%s prior=%s jira=%s", as_of, prior, jira)
 
@@ -159,6 +162,16 @@ def run(as_of: date, prior: date | None = None, jira: str = "snapshot",
         jira_by_team=jm.by_team(t, as_of), jira_aging=jm.aging(t),
         jira_trend=jm.weekly_trend(t, as_of), jira_overdue=jm.open_overdue_list(t),
         issues=issues, run_info=run_info)
+
+    if commentary == "local-llm":
+        res = commentary_mod.generate(data, default_commentary(data), model=model)
+        data.commentary, data.commentary_source = res.bullets, res.source
+        day_dir = out_dir / as_of.isoformat()
+        day_dir.mkdir(parents=True, exist_ok=True)
+        (day_dir / f"commentary_audit_{as_of:%Y%m%d}.json").write_text(
+            json.dumps({"source": res.source, "attempts": res.attempts}, indent=1),
+            encoding="utf-8")
+    data.run_info.loc[len(data.run_info)] = ["commentary", data.commentary_source]
 
     day_dir = out_dir / as_of.isoformat()
     path = write_report(data, day_dir / f"portfolio_ops_report_{as_of:%Y%m%d}.xlsx")

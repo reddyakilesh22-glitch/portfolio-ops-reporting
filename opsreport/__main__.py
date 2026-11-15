@@ -36,6 +36,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--out", type=Path, default=OUTPUT_DIR)
     r.add_argument("--allow-errors", action="store_true",
                    help="write the report even if data-quality ERRORs are found")
+    r.add_argument("--commentary", choices=["template", "local-llm"], default="template",
+                   help="local-llm drafts commentary with a local Ollama model, "
+                        "fact-checked against the report; falls back to template")
+    r.add_argument("--model", default="llama3.2", help="Ollama model for --commentary")
     r.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -52,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     log = logging.getLogger("opsreport")
     try:
         res = run(args.as_of, args.prior, args.jira, args.snapshot, args.out,
-                  args.allow_errors)
+                  args.allow_errors, args.commentary, args.model)
     except DataQualityError as exc:
         log.error("%s", exc)
         return 2

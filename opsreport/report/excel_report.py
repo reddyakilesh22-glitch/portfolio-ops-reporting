@@ -26,6 +26,7 @@ class ReportData:
     issues: pd.DataFrame
     run_info: pd.DataFrame
     commentary: list[str] = field(default_factory=list)
+    commentary_source: str = "template"
 
 
 _ACRONYMS = {"aum": "AUM", "mv": "MV", "usd": "USD", "fx": "FX", "sla": "SLA",
@@ -151,8 +152,6 @@ def _summary(w: _Writer, d: ReportData) -> None:
     ws.write(1, 0, f"As of {d.as_of:%A %d %B %Y}{prior} | synthetic data", w.f["subtitle"])
 
     total = d.aum[d.aum["fund_code"] == "TOTAL"].iloc[0]
-    errors = int((d.issues["severity"] == "ERROR").sum()) if len(d.issues) else 0
-    warnings = int((d.issues["severity"] == "WARNING").sum()) if len(d.issues) else 0
     high = int((d.breaks["materiality"] == "High").sum())
     k = d.jira_kpis
     tiles = [
@@ -171,10 +170,16 @@ def _summary(w: _Writer, d: ReportData) -> None:
 
     row = 10
     ws.merge_range(row, 0, row, 7, "Commentary", w.f["h2"])
-    lines = d.commentary or _default_commentary(d, errors, warnings)
+    lines = d.commentary or default_commentary(d)
+    row += 1
+    label = (f"AI draft ({d.commentary_source.removeprefix('llm:')}): every number "
+             "checked against this report. Analyst review required before sending."
+             if d.commentary_source.startswith("llm:")
+             else f"Source: {d.commentary_source}")
+    ws.merge_range(row, 0, row, 7, label, w.f["subtitle"])
     for i, line in enumerate(lines, start=1):
         ws.merge_range(row + i, 0, row + i, 7, f"• {line}", w.f["wrap"])
-        ws.set_row(row + i, 20)
+        ws.set_row(row + i, 18 * (1 + len(line) // 130))   # ~130 chars per line
     row += len(lines) + 2
 
     ws.merge_range(row, 0, row, 7, "AUM by fund (fund accounting, USD)", w.f["h2"])
@@ -192,7 +197,10 @@ def _summary(w: _Writer, d: ReportData) -> None:
     ws.activate()
 
 
-def _default_commentary(d: ReportData, errors: int, warnings: int) -> list[str]:
+def default_commentary(d: ReportData) -> list[str]:
+    """Deterministic template commentary (fallback for the AI draft)."""
+    errors = int((d.issues["severity"] == "ERROR").sum()) if len(d.issues) else 0
+    warnings = len(d.issues) - errors
     total = d.aum[d.aum["fund_code"] == "TOTAL"].iloc[0]
     lines = []
     if "aum_change" in d.aum:

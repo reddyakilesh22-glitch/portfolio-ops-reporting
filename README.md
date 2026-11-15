@@ -15,19 +15,26 @@ tickets that track those breaks in Jira.
 | Excel extract (custodian, fund accounting, FX workbooks) | done |
 | Validation, reconciliation, AUM, Jira SLA metrics, Excel report | done |
 | Runbook + 4 incidents fixed via issue -> test -> PR | done |
-| AI commentary with numeric guardrails | next |
+| AI commentary (local LLM) with numeric guardrails | done |
 
 ## Operations
 
 - [Runbook](docs/RUNBOOK.md): weekly checklist, re-runs, troubleshooting by error message
 - [Incident log](docs/INCIDENTS.md): what broke, root cause, fix, and the PR for each
+- [AI commentary](docs/AI_COMMENTARY.md): design, guardrail rules, what it caught, limits
 
 ## Run the weekly report
 
 ```bash
 python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06            # offline (Jira snapshot)
 python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06 --jira live  # pull Jira, save snapshot
+python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06 --commentary local-llm  # AI draft
 ```
+
+`--commentary local-llm` drafts the Summary commentary with a local model via
+[Ollama](https://ollama.com) (`ollama pull llama3.2`). Every number in the draft is
+checked against the report; failures retry once, then fall back to the template.
+See [docs/AI_COMMENTARY.md](docs/AI_COMMENTARY.md).
 
 Writes `output/<date>/portfolio_ops_report_<yyyymmdd>.xlsx` plus `breaks_*.csv`,
 `data_quality_*.csv`, and `output/run.log`. Exit code 2 = data-quality ERROR
