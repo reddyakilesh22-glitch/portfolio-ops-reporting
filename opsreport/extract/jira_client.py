@@ -27,6 +27,17 @@ from opsreport.config import CONFIG_DIR, JiraSettings, load_jira_settings, load_
 log = logging.getLogger(__name__)
 
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+MAX_WAIT_SECONDS = 60.0
+
+
+def _retry_after(resp: requests.Response, attempt: int) -> float:
+    """Seconds to wait. Retry-After may be a number of seconds or an HTTP date;
+    fall back to exponential backoff for anything unreadable. Always capped."""
+    try:
+        wait = float(resp.headers.get("Retry-After", ""))
+    except ValueError:
+        wait = float(2**attempt)
+    return max(0.0, min(wait, MAX_WAIT_SECONDS))
 
 
 class JiraError(RuntimeError):
@@ -56,12 +67,36 @@ class JiraClient:
         )
 
     # ------------------------------------------------------------------ http
-    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def request(self, method: str, path: str, *, idempotent: bool | None = None,
+                **kwargs: Any) -> Any:
+        """Call Jira, retrying what is safe to retry.
+
+        `idempotent` = repeating the call can't change anything twice. Reads are;
+        a POST that creates tickets is not, so it is retried only on 429 (Jira
+        refused it before doing any work), never after a 5xx or a dropped
+        connection, where the first attempt may have succeeded.
+        """
+        if idempotent is None:
+            idempotent = method in ("GET", "PUT", "DELETE")
         url = f"{self.base_url}{path}"
         for attempt in range(1, self.max_retries + 1):
-            resp = self.session.request(method, url, timeout=self.timeout, **kwargs)
-            if resp.status_code in RETRY_STATUSES and attempt < self.max_retries:
-                wait = float(resp.headers.get("Retry-After", 2**attempt))
+            last = attempt == self.max_retries
+            try:
+                resp = self.session.request(method, url, timeout=self.timeout, **kwargs)
+            except requests.RequestException as exc:
+                if idempotent and not last:
+                    wait = min(2**attempt, MAX_WAIT_SECONDS)
+                    log.warning("Jira %s %s: %s; retrying in %.0fs", method, path,
+                                type(exc).__name__, wait)
+                    time.sleep(wait)
+                    continue
+                raise JiraError(f"Jira {method} {path}: network error after {attempt} "
+                                f"attempt(s): {type(exc).__name__}: {str(exc)[:200]}"
+                                ) from exc
+            retryable = resp.status_code == 429 or (
+                idempotent and resp.status_code in RETRY_STATUSES)
+            if retryable and not last:
+                wait = _retry_after(resp, attempt)
                 log.warning("Jira %s %s -> %s; retrying in %.0fs", method, path,
                             resp.status_code, wait)
                 time.sleep(wait)
@@ -76,8 +111,8 @@ class JiraClient:
     def get(self, path: str, **params: Any) -> Any:
         return self.request("GET", path, params=params or None)
 
-    def post(self, path: str, body: dict) -> Any:
-        return self.request("POST", path, json=body)
+    def post(self, path: str, body: dict, *, idempotent: bool = False) -> Any:
+        return self.request("POST", path, json=body, idempotent=idempotent)
 
     def put(self, path: str, body: dict) -> Any:
         return self.request("PUT", path, json=body)
@@ -176,7 +211,7 @@ class JiraClient:
             body: dict[str, Any] = {"jql": jql, "fields": fields, "maxResults": page_size}
             if token:
                 body["nextPageToken"] = token
-            page = self.post("/rest/api/3/search/jql", body)
+            page = self.post("/rest/api/3/search/jql", body, idempotent=True)  # a read
             yield from page.get("issues", [])
             token = page.get("nextPageToken")
             if page.get("isLast") is True or not token:
@@ -222,6 +257,10 @@ def _value(raw: Any) -> Any:
     return raw
 
 
+_BASE_COLUMNS = ["key", "summary", "issue_type", "status", "status_category", "priority",
+                 "assignee", "labels", "due_date", "created", "updated", "resolved"]
+
+
 def issues_to_frame(issues: list[dict], field_ids: dict[str, str]) -> pd.DataFrame:
     rows = []
     for issue in issues:
@@ -245,9 +284,9 @@ def issues_to_frame(issues: list[dict], field_ids: dict[str, str]) -> pd.DataFra
             row[logical] = _value(f.get(fid))
         rows.append(row)
 
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
+    # Fixed columns even with zero issues, so an empty project is an empty
+    # table rather than a table with no columns.
+    df = pd.DataFrame(rows, columns=[*_BASE_COLUMNS, *field_ids])
     for col in ("created", "updated", "resolved"):
         df[col] = pd.to_datetime(df[col], utc=True, format="ISO8601")
     for col in ("due_date", "business_date", "resolved_business_date"):

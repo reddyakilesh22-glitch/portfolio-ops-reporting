@@ -16,7 +16,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from opsreport.calendar import busday_count
+from opsreport.calendar import busday_count, uncovered_years
 
 AGE_BUCKETS = [(-1, 1, "0-1d"), (1, 5, "2-5d"), (5, 10, "6-10d"), (10, 10_000, "11d+")]
 
@@ -41,6 +41,17 @@ def prepare(tickets: pd.DataFrame, as_of: date) -> pd.DataFrame:
     df["age_bucket"] = pd.cut(df["age_bdays"], [b[0] for b in AGE_BUCKETS] + [10_000],
                               labels=[b[2] for b in AGE_BUCKETS])
     return df
+
+
+def calendar_gaps(df: pd.DataFrame, as_of: date) -> tuple[list[int], int]:
+    """Years missing from the holiday calendar that open tickets reach back
+    into, and how many open tickets were raised in those years."""
+    open_ = df[df["open_as_of"]]
+    if open_.empty:
+        return [], 0
+    years = uncovered_years(min(open_["business_date"]), as_of)
+    n = int(open_["business_date"].map(lambda d: d.year in years).sum())
+    return years, n
 
 
 def week_bounds(as_of: date) -> tuple[date, date]:

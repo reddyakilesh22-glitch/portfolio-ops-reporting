@@ -99,7 +99,9 @@ Safety checks that stop the run with a clear message:
 
 - Calls Jira's REST API with an API token from `.env`.
 - Uses `POST /rest/api/3/search/jql` and follows `nextPageToken` page by page.
-- Retries when Jira answers 429 (rate limited) or 5xx.
+- Retries dropped connections, 429 (rate limited) and 5xx for calls that only
+  read. A call that creates tickets is retried only on 429, because after a
+  5xx or a dropped connection the first attempt may already have worked.
 - Custom fields are looked up **by display name** (portable across Jira
   sites). Each field's id is also pinned in `jira_field_lock.yaml`; if a field
   is renamed, the run follows the id and raises a warning instead of stopping.
@@ -113,7 +115,7 @@ Safety checks that stop the run with a clear message:
 | Severity | Effect | Checks |
 |---|---|---|
 | ERROR | Run stops, exit code 2 | Blank required field; same fund and ISIN twice; the same row twice on the custodian statement; ISIN fails its check digit; currency with no FX rate; duplicate Jira key |
-| WARNING | Listed on the Data Quality tab | Quantity zero or negative; market value ≠ quantity × price; FX rate differs from the official file; Jira ticket missing a field or due date, Done without a resolved date, or resolved before it was raised; Jira field renamed; run date is not a business day |
+| WARNING | Listed on the Data Quality tab | Quantity zero or negative; market value ≠ quantity × price; FX rate differs from the official file; Jira ticket missing a field or due date, Done without a resolved date, or resolved before it was raised; Jira field renamed; run date is not a business day; an open ticket predates the holiday calendar; report forced with `--allow-errors` |
 
 Checks never repair data. They say what is wrong and where. The prior week's
 files get the same position checks, because they feed the week-over-week change.
