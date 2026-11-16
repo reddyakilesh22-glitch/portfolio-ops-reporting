@@ -183,6 +183,138 @@ def test_run_health_reports_failed_and_missing_days(db, tmp_path):
     assert rh["ok_days"] == rh["expected_days"] - 2
 
 
+# ---------------------------------------------------- industry measures
+def test_match_rate_counts_every_holding_and_every_difference(h):
+    f = full("Daily")
+    mt = dd.match_trend(h, f)
+    a = h.aum[h.aum["run_date"].between(*WINDOW)]
+    b = h.breaks[h.breaks["run_date"].between(*WINDOW)]
+    assert mt["compared"].sum() == a["holdings_compared"].sum()
+    assert mt["unmatched"].sum() == len(b)
+    assert mt["actionable"].sum() == (b["status"] == "Actionable").sum()
+    assert (mt["match_rate"] <= mt["match_rate_ex_timing"]).all()
+    monthly = dd.match_trend(h, full("Monthly"))
+    assert monthly["compared"].sum() == mt["compared"].sum()
+
+
+def test_match_rate_ignores_type_filter_but_follows_fund(h):
+    allm = dd.match_trend(h, full())
+    assert dd.match_trend(h, full(types=("Price Break",)))["match_rate"].equals(
+        allm["match_rate"])
+    gef = dd.match_trend(h, full(funds=("GEF",)))
+    assert gef["compared"].sum() < allm["compared"].sum()
+
+
+def test_holdings_compared_counts_a_position_on_either_side_once():
+    cust = pd.DataFrame({"fund_code": ["A", "A", "B"], "isin": ["X", "Y", "Z"]})
+    acct = pd.DataFrame({"fund_code": ["A", "A"], "isin": ["X", "W"]})
+    aum = pd.DataFrame({"fund_code": ["A", "B"]})
+    out = daily.with_match_basis(aum, cust, acct)
+    assert list(out["holdings_compared"]) == [3, 1]
+    assert out["shares_outstanding"].isna().all()       # not funds from funds.yaml
+
+
+@pytest.mark.parametrize("grain", ["Daily", "Weekly", "Monthly"])
+def test_roll_forward_adds_up_and_chains(h, grain):
+    rf = dd.roll_forward(h, full(grain))
+    assert (rf["opening"] + rf["new"] - rf["cleared"] == rf["closing"]).all()
+    assert (rf["opening"].iloc[1:].values == rf["closing"].iloc[:-1].values).all()
+    assert rf["closing"].iloc[-1] == dd.kpis(h, full())["now"]["open_breaks"]
+
+
+def test_roll_forward_respects_filters(h):
+    rf = dd.roll_forward(h, full(funds=("GEF",), types=("Price Break",)))
+    assert (rf["opening"] + rf["new"] - rf["cleared"] == rf["closing"]).all()
+    assert rf["new"].sum() <= dd.roll_forward(h, full())["new"].sum()
+
+
+def test_cleared_breaks_are_gone_on_the_clear_date(h):
+    c = dd.cleared_breaks(h, full())
+    assert len(c) and (c["days_to_clear"] >= 1).all()
+    seen = set(zip(h.breaks["run_date"], h.breaks["break_id"], strict=True))
+    act = h.breaks[h.breaks["status"] == "Actionable"]
+    still = set(zip(act["run_date"], act["break_id"], strict=True))
+    assert not any((d, i) in still for d, i in zip(c["cleared_on"], c["break_id"],
+                                                    strict=True))
+    assert seen                                      # sanity: history not empty
+    k = dd.kpis(h, full())["now"]
+    assert k["cleared"] == len(c)
+    assert k["avg_days_to_clear"] == pytest.approx(c["days_to_clear"].mean())
+
+
+def test_age_bands():
+    assert dd.age_labels([1, 5, 10]) == ["0–1 days", "2–5 days", "6–10 days", "11+ days"]
+    got = dd.age_bucket(pd.Series([0, 1, 2, 5, 6, 10, 11, 40]))
+    assert list(got) == ["0–1 days"] * 2 + ["2–5 days"] * 2 + ["6–10 days"] * 2 + \
+        ["11+ days"] * 2
+
+
+def test_aging_now_adds_up_to_open_breaks(h):
+    ag = dd.aging_now(h, full())
+    k = dd.kpis(h, full())["now"]
+    assert list(ag["age_bucket"]) == dd.AGE_BUCKETS
+    assert ag["breaks"].sum() == k["open_breaks"]
+    old = ag[ag["age_bucket"].isin(dd.AGE_BUCKETS[2:])]["breaks"].sum()
+    assert old == k["aged_breaks"]                   # bands agree with "aged over 5"
+
+
+def test_aging_trend_adds_up_to_breaks_trend(h):
+    by_type = dd.breaks_trend(h, full())
+    by_age = dd.breaks_trend(h, full(), by="age_bucket")
+    assert by_age["avg_open"].sum() == pytest.approx(by_type["avg_open"].sum())
+
+
+@pytest.mark.parametrize("per_share, pct, level", [
+    (0.009, 0.004, 0), (0.01, 0.004, 1), (-0.02, -0.001, 1), (0.001, 0.005, 2),
+    (0.5, -0.006, 2)])
+def test_nav_levels(per_share, pct, level):
+    got = dd.nav_level(pd.Series([per_share]), pd.Series([pct]))
+    assert got.iloc[0] == dd.NAV_LEVELS[level]
+
+
+def test_nav_impact_nets_unexplained_breaks_per_fund(h):
+    day = WINDOW[1]
+    nav = dd.nav_impact_daily(h, full())
+    today = nav[nav["run_date"] == day].set_index("fund_code")
+    b = h.breaks[(h.breaks["run_date"] == day) & (h.breaks["status"] == "Actionable")]
+    counted = b[~b["explanation"].fillna("").str.startswith("Settlement failed")]
+    want = counted.groupby("fund_code")["base_mv_diff"].sum()
+    for code, row in today.iterrows():
+        assert row["net_diff_usd"] == pytest.approx(want.get(code, 0.0))
+        assert row["impact_per_share"] == pytest.approx(
+            row["net_diff_usd"] / row["shares_outstanding"])
+        assert row["impact_pct_of_nav"] == pytest.approx(row["net_diff_usd"] / row["aum"])
+
+
+def test_failed_settlements_never_count_towards_nav_impact(h):
+    fails = h.breaks[h.breaks["explanation"].fillna("").str.startswith("Settlement failed")]
+    assert len(fails)                                 # the data has some
+    nav = dd.nav_impact_daily(h, full())
+    for (d, code), grp in fails.groupby(["run_date", "fund_code"]):
+        other = h.breaks[(h.breaks["run_date"] == d) & (h.breaks["fund_code"] == code)
+                         & (h.breaks["status"] == "Actionable")
+                         & ~h.breaks.index.isin(grp.index)]
+        row = nav[(nav["run_date"] == d) & (nav["fund_code"] == code)].iloc[0]
+        assert row["net_diff_usd"] == pytest.approx(other["base_mv_diff"].sum())
+
+
+def test_nav_impact_summary_and_kpi_agree(h):
+    nav = dd.nav_impact(h, full())
+    k = dd.kpis(h, full())["now"]
+    assert len(nav) == k["funds"] == 5
+    assert (nav["level"] != dd.NAV_LEVELS[0]).sum() == k["funds_over_nav"]
+    assert (nav["days_over_threshold"] <= nav["run_days"]).all()
+
+
+def test_funds_table_match_rate_matches_the_trend(h):
+    ft = dd.funds(h, full())
+    day = dd.match_trend(h, dd.Filters(WINDOW[1], WINDOW[1], "Daily"))
+    a = h.aum[h.aum["run_date"] == WINDOW[1]].set_index("fund_code")
+    weighted = (ft.set_index("fund_code")["match_rate"] * a["holdings_compared"]).sum() \
+        / a["holdings_compared"].sum()
+    assert weighted == pytest.approx(day["match_rate"].iloc[0])
+
+
 # ----------------------------------------------------------- the app
 def run_app(db, monkeypatch):
     """Every later .run() re-executes the script, so the variable must stay set
@@ -197,7 +329,11 @@ def test_app_renders_every_tab_for_every_grain_and_filter(db, monkeypatch):
     assert not at.exception
     assert [t.label for t in at.tabs] == ["Overview", "Breaks", "Tickets & SLA", "Funds",
                                           "Run health"]
-    assert at.metric[0].label == "Open breaks"
+    assert [m.label for m in at.metric[:10]] == [
+        "Match rate", "Open breaks", "Exposure at risk", "Aged over 5 days",
+        "Avg days to clear", "Funds over NAV line", "SLA on time", "Overdue tickets",
+        "Expected (timing)", "AUM"]
+    assert all(m.value != "n/a" for m in at.metric[:10])    # every figure computed
     for grain in ("Daily", "Monthly"):
         at.segmented_control[0].set_value(grain).run()
         assert not at.exception, grain

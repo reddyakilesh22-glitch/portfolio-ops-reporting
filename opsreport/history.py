@@ -7,6 +7,11 @@ calculations, so the views cannot disagree with each other.
 
 Re-running a day replaces that day's rows in one transaction, so a re-run
 is safe and a crash mid-write leaves the previous version intact.
+
+The schema version is kept in `PRAGMA user_version`. An older database is
+upgraded in place by MIGRATIONS (columns added, nothing rewritten); days saved
+before a column existed keep NULL there, and the dashboard shows them as n/a
+rather than as a wrong number.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ import pandas as pd
 from opsreport.config import ROOT
 
 DB_PATH = ROOT / "data" / "history.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -75,6 +80,8 @@ CREATE TABLE IF NOT EXISTS aum_daily (
     aum                  REAL,
     custodian_mv         REAL,
     acct_vs_custodian_mv REAL,
+    holdings_compared    INTEGER,
+    shares_outstanding   REAL,
     PRIMARY KEY (run_date, fund_code)
 );
 CREATE TABLE IF NOT EXISTS data_quality (
@@ -115,7 +122,8 @@ COLUMNS = {
                "quantity_diff", "pricing_source", "first_seen", "days_open", "ticket_key",
                "ticket_status", "ticket_due", "ops_team"],
     "aum_daily": ["run_date", "fund_code", "fund_name", "positions", "securities_mv", "cash",
-                  "accrued_income", "aum", "custodian_mv", "acct_vs_custodian_mv"],
+                  "accrued_income", "aum", "custodian_mv", "acct_vs_custodian_mv",
+                  "holdings_compared", "shares_outstanding"],
     "data_quality": ["run_date", "severity", "source", "rule", "detail", "record"],
     "tickets": ["key", "break_id", "summary", "status", "status_category", "priority",
                 "fund", "ops_team", "break_type", "break_amount_usd", "business_date",
@@ -123,6 +131,13 @@ COLUMNS = {
 }
 DATE_COLUMNS = {"run_date", "first_seen", "ticket_due", "business_date", "due_date",
                 "resolved_business_date"}
+
+
+# version -> statements that bring a database at that version up to the next.
+MIGRATIONS = {
+    1: ["ALTER TABLE aum_daily ADD COLUMN holdings_compared INTEGER",
+        "ALTER TABLE aum_daily ADD COLUMN shares_outstanding REAL"],
+}
 
 
 class HistoryError(RuntimeError):
@@ -133,12 +148,19 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, SCHEMA_VERSION):
+    if version > SCHEMA_VERSION:
         conn.close()
         raise HistoryError(f"{path} has schema version {version}, expected "
-                           f"{SCHEMA_VERSION}; rebuild it with `opsreport backfill`")
-    conn.executescript(SCHEMA)
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                           f"{SCHEMA_VERSION}: written by newer code. Update, or rebuild "
+                           "it with `opsreport backfill`")
+    with conn:
+        if version == 0:                     # new file
+            conn.executescript(SCHEMA)
+        while 0 < version < SCHEMA_VERSION:
+            for sql in MIGRATIONS[version]:
+                conn.execute(sql)
+            version += 1
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
 
 

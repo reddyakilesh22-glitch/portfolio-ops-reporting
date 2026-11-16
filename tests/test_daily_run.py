@@ -311,6 +311,24 @@ def test_incompatible_history_file_is_refused(tmp_path):
         history.connect(path)
 
 
+def test_version_1_history_is_upgraded_in_place(tmp_path):
+    path = tmp_path / "h.db"
+    old = sqlite3.connect(path)
+    old.executescript(history.SCHEMA.replace(
+        "    holdings_compared    INTEGER,\n    shares_outstanding   REAL,\n", ""))
+    old.execute("INSERT INTO aum_daily (run_date, fund_code, aum) VALUES "
+                "('2026-01-05', 'GEF', 1.0)")
+    old.execute("PRAGMA user_version = 1")
+    old.commit()
+    old.close()
+    conn = history.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == history.SCHEMA_VERSION
+    a = history.read(conn, "aum_daily")
+    assert a["aum"].tolist() == [1.0] and a["holdings_compared"].isna().all()
+    conn.close()
+    history.connect(path).close()                   # idempotent
+
+
 def test_failed_status_must_be_ok_or_failed(tmp_path):
     conn = history.connect(tmp_path / "h.db")
     with pytest.raises(sqlite3.IntegrityError):
