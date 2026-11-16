@@ -1,13 +1,64 @@
-# Runbook: Portfolio Ops Weekly Report
+# Runbook: Portfolio Ops Reporting
 
-**Purpose:** Reconcile custodian holdings against fund accounting, report AUM by
-fund, and report SLA performance of the ops tickets (Jira) that track breaks.
-**Cadence:** Weekly, for the Friday business date (`as_of`), run Monday morning
-before the 10:00 ops review.
-**Owner:** Reporting analyst. **Consumers:** Ops leads (Reconciliation, NAV
-Oversight, Trade Support, Corporate Actions, Reference Data), fund controllers.
+**Purpose:** Reconcile custodian holdings against fund accounting every
+business day, keep the history, and report it: a daily exceptions file for
+analysts, a weekly report for ops leads, and a dashboard for leadership.
+**Cadence:** Daily run each business morning for the previous business day.
+Weekly report for the Friday date, Monday before the 10:00 ops review.
+**Owner:** Reporting analyst. **Consumers:** Ops analysts and leads
+(Reconciliation, NAV Oversight, Trade Support, Corporate Actions, Reference
+Data), fund controllers, operations leadership.
 
 ---
+
+## 0. Daily run checklist
+
+1. **Confirm inputs are present** for the business date:
+   ```
+   data/daily/<date>/custodian_holdings_<yyyymmdd>.xlsx
+   data/daily/<date>/fund_accounting_positions_<yyyymmdd>.xlsx
+   data/daily/<date>/fx_rates_<yyyymmdd>.xlsx
+   data/daily/<date>/pending_trades_<yyyymmdd>.xlsx
+   ```
+2. **Run:**
+   ```bash
+   python -m opsreport daily --as-of <date>
+   ```
+   | Exit | Meaning | Action |
+   |---|---|---|
+   | 0 | History updated, exceptions file written | Step 3 |
+   | 2 | Data-quality ERROR. The day is saved as FAILED with its errors; nothing published | Section 3, "DQ errors"; fix and re-run the same command |
+   | 1 | Missing or unreadable file (also saved as FAILED), or a setup problem | Section 3, match the message |
+3. **Sanity-check** `output/daily/<date>/ops_exceptions_<yyyymmdd>.xlsx`:
+   - **Expected** tab: every row settles on a future date. A row whose
+     settlement date has passed would be on Action Today instead; if not, stop
+     and investigate.
+   - **Action Today**: overdue tickets are at the top. "No ticket yet" rows need
+     a ticket raised today.
+   - A sudden jump in actionable breaks usually has one shared cause (an FX
+     rate, one fund's file): check before raising many tickets.
+4. **Send** the exceptions file to the ops analysts' channel.
+
+### Backfill and re-running a day
+```bash
+python -m opsreport backfill --from 2026-05-18 --to 2026-11-13   # every business day
+python -m opsreport daily --as-of 2026-11-04                      # one corrected day
+```
+- Re-running a day replaces that day's rows; it is safe to repeat.
+- Break IDs are carried forward from the previous successful day. After
+  correcting an *earlier* day, re-run the backfill from that day to the latest
+  so later days chain their IDs from the corrected data.
+- Backfill exits 2 if any day failed and lists them; the others are saved.
+
+### Dashboard
+```bash
+streamlit run dashboard/app.py                         # reads data/history.db
+OPSREPORT_DB=/path/to/history.db streamlit run dashboard/app.py
+```
+It shows whatever is in the history: run the daily job first. The **Run
+health** tab shows every business day as OK, FAILED or missing; check it
+before presenting numbers. "As of" on the dashboard is the last *successful*
+run in the selected range.
 
 ## 1. Weekly run checklist
 
@@ -85,6 +136,15 @@ unexpected error (a bug): open an issue with the log attached.
 | `A Jira snapshot for <date> already exists` | `--jira live` used for a week that already has a saved pull | Re-run without `--jira live`; add `--refresh-snapshot` only to replace it on purpose |
 | `duplicate_lot` (DQ error) | The custodian statement lists the same fund, security and location twice | Ask the custodian for a corrected statement; do not delete the row yourself |
 | `No Jira snapshot on/after` | Running offline for a week with no snapshot | Run with `--jira live` |
+| `pending_trades file not found` (daily) | Trade report late from the order management system | Request it. Do not run without it: every trade-date break would show as actionable |
+| `report dates [...], expected` / `trade date is after the report date` (pending trades) | Wrong day's trade report | Request the correct file |
+| `'Side' must be Buy or Sell` / `'Quantity' must be a positive number` / `trade id repeated` | Malformed trade report | Raise with the trading-system owners; do not edit the file |
+| `pending_trade_without_break` (DQ warning) | An open trade on a position where the two records agree | Either the trade report is stale (trade already settled) or the trade was never booked in accounting: check with Trade Support |
+| `Settlement failed: ... was due` (Action Today) | Shares or cash didn't arrive on the settlement date | Chase the custodian or executing broker; the ticket is Trade Support's |
+| `Unknown (ticket data incomplete)` (ticket status) | The linked Jira ticket is Done with no Resolved Business Date | Fill in the date in Jira; the ticket is also on the Data Quality tab |
+| `no_ticket_snapshot` (DQ warning) | The Jira snapshot file is missing | Breaks are still reported, without tickets; restore the snapshot |
+| `HistoryError: ... schema version` | `history.db` was built by a different version of the code | Rebuild: delete it and run `backfill` (inputs are kept, so nothing is lost) |
+| Dashboard says `No history found` | `data/history.db` not built yet, or `OPSREPORT_DB` points elsewhere | Run `backfill`, or fix the path |
 
 ### DQ errors (exit 2)
 The run stops before publishing when inputs can't be trusted (bad ISIN,
@@ -119,4 +179,7 @@ without saying so.
 | Tolerances, materiality | `config/recon.yaml` |
 | Business-day calendar | `config/calendar.yaml` (update each December) |
 | Credentials | `.env` (never committed); template `.env.example` |
-| Planted-break answer keys (tests) | `data/expected/` |
+| Planted-break answer keys (tests) | `data/expected/` (weekly), `data/daily/expected/` (daily, generated) |
+| Pending-trades layout | `config/excel_layouts.yaml` (`pending_trades`) |
+| Daily history | `data/history.db` (rebuilt by `backfill`; not in git) |
+| Dashboard settings | `.streamlit/config.toml` |
