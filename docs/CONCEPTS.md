@@ -137,6 +137,59 @@ sample data one pricing vendor ("VendorB") is behind 40% of all breaks: a
 conversation with that vendor would prevent more breaks than any amount of
 faster fixing.
 
+## How the operation is measured
+
+Counting today's breaks says little on its own. These are the measures
+reconciliation teams and fund controllers use across the industry, and the
+ones the dashboard shows.
+
+**Match rate.** Of all the holdings compared today, the share where both
+records agree. 67 holdings, 14 with a difference: 79% matched. Shown twice:
+counting every difference, and leaving out timing differences (which fix
+themselves). A falling match rate is the earliest sign that something upstream
+has changed.
+
+**Aging.** How long open breaks have been open, in bands: 0–1, 2–5, 6–10 and
+11+ business days. A new break is normal; one that is three weeks old means
+nobody can fix it, or nobody is trying. Like an unpaid-invoices report sorted
+by how overdue each one is.
+
+**Roll-forward.** Opening breaks + new − cleared = closing breaks, for each
+week or month. Like a bank statement: opening balance, money in, money out,
+closing balance. If more break each week than get fixed, the backlog grows
+even when every single break is handled well.
+
+**Days to clear.** For breaks that were fixed: business days from first
+appearing to gone. Here, 4.3 on average.
+
+**Potential NAV impact.** A fund's price per share (its NAV) is worked out
+from the accounting books. If a break means the *books* are wrong, the price is
+wrong. Net up a fund's unexplained breaks and divide by its shares: that is how
+far the price could be off. Two lines are common US practice:
+
+| Price off by | What usually happens |
+|---|---|
+| Under 1 cent a share | Treated as immaterial |
+| 1 cent a share or more | A **NAV error**: reported to the fund's board, and the fund is usually reimbursed |
+| 0.5% of NAV or more | Investors' purchases and redemptions at the wrong price are **reprocessed** |
+
+Two kinds of break are left out, because the books are right in both:
+*timing* breaks (the trade is agreed but not yet delivered) and *failed
+settlements* (the delivery date has passed but the other side hasn't
+delivered). Funds record trades on the trade date, so in both cases the books
+already show the correct holding and the custodian is the one waiting. A failed
+settlement is a settlement risk to chase, not a pricing error. It is called
+*potential* impact because breaks are normally fixed before the day's price is
+struck.
+
+**Month-end sign-off.** Once a month a fund controller signs that each
+fund's records were reconciled. A fund is **Ready to sign** when, on the
+month's last business day: every business day was reconciled, no
+high-value break is open, the NAV impact is under 1 cent a share, no break is
+older than 10 business days, and no ticket is overdue. Otherwise it **Needs
+attention**, with the reasons listed, and the controller either waits for a
+fix or writes down why the open item is acceptable.
+
 ## The numbers on the report
 
 **Market value (MV).** What a holding is worth: quantity × price.
@@ -174,19 +227,29 @@ holidays such as Thanksgiving.
 | Book of record | The official version of the truth; here, fund accounting |
 | Actionable break | A break someone has to investigate and fix |
 | Aged break | An actionable break open more than 5 business days |
+| Aging bands | Open breaks grouped by age: 0–1, 2–5, 6–10, 11+ business days |
+| Days to clear | Business days from a break first appearing to it being gone |
 | Break | A difference between the custodian's record and the accounting record |
 | Break ID | The name a break keeps from the day it appears until it clears, e.g. `BRK-20261113-EMD-<ISIN>` |
 | Control total | The total printed on a statement, used to check that every row was read |
 | Custodian | The bank that holds a fund's assets for safekeeping |
+| Fund controller | The person accountable for a fund's books; signs off its reconciliation each month |
 | Expected break | A break fully explained by a trade that hasn't reached its settlement date yet |
 | Depository | The central institution where securities are ultimately held (e.g. DTC in the US, Euroclear in Europe). A custodian may hold one position across several |
+| Match rate | The share of holdings compared where both records agree |
+| Month-end sign-off | A controller's monthly confirmation that a fund's records were reconciled; open items are explained |
 | ISIN | A 12-character code that uniquely identifies a security worldwide; the last character is a check digit |
 | Lot | One row of a holding on the custodian statement, when a holding is split across locations |
 | NAV | Net asset value: what a fund is worth; the basis for its price per share |
+| NAV error | The published price per share was wrong by 1 cent or more; reported to the fund's board |
+| NAV impact (potential) | How far a fund's price per share would be off if its open unexplained breaks are errors in the books |
+| Reprocessing | Redoing investors' purchases and redemptions at the corrected price, usually for an error of 0.5% of NAV or more |
+| Roll-forward | Opening + new − cleared = closing, for breaks in a period |
 | Failed settlement | A trade whose settlement date passed without the shares or cash arriving |
 | Pending trade | A trade booked in the accounting books but not yet settled at the custodian |
 | Position | How much of one security a fund holds |
 | Security | Anything tradeable a fund holds: a share, a bond, an ETF |
+| Shares outstanding | How many shares of a fund investors hold; NAV ÷ shares = price per share |
 | Security master | The reference list of facts about each security (name, currency, type) |
 | Root cause | Why a break happened (a vendor's price, a late settlement); counting them shows what to fix upstream |
 | Settlement | The moment shares and cash actually change hands, usually one business day after the trade is agreed |
