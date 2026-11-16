@@ -150,8 +150,10 @@ tabs Sign-off, Checks, Open at Month-end, Roll-forward, NAV Impact, Run Log.
 
 In the sample data (six months to 13 Nov 2026): 5 funds worth $404M. From
 October, open breaks per day roughly triple and the match rate falls from about
-92% to 79%. The top recurring cause is one pricing vendor (40% of breaks), and
-its wrong prices are what push funds over the 1-cent NAV line. In October only
+92% to 79%. The top recurring cause is one pricing vendor (40% of breaks), but
+the funds that cross the 1-cent NAV line do so mostly through wrong prices from
+both vendors and cash not booked: counting breaks and measuring their impact
+point to different fixes. In October only
 1 of 5 funds is ready to sign at month-end, against 3 of 5 in June. That is the
 kind of pattern the dashboard is built to surface.
 
