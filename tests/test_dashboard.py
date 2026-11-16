@@ -4,24 +4,17 @@ from datetime import date
 
 import pandas as pd
 import pytest
+from conftest import HISTORY_WINDOW as WINDOW
 from streamlit.testing.v1 import AppTest
 
 from opsreport import daily, history
 from opsreport import dashboard_data as dd
 from opsreport.config import ROOT
-from scripts import generate_daily_data as gd
-
-WINDOW = (date(2026, 9, 28), date(2026, 11, 13))        # 7 weeks, Oct + Nov
 
 
 @pytest.fixture(scope="module")
-def db(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("dash")
-    gd.generate(tmp / "raw", *WINDOW)
-    path = tmp / "h.db"
-    daily.backfill(*WINDOW, raw_dir=tmp / "raw", db_path=path, out_dir=tmp / "out",
-                   snapshot=tmp / "raw" / gd.SNAPSHOT_NAME)
-    return path
+def db(history_db):
+    return history_db
 
 
 @pytest.fixture(scope="module")
@@ -328,7 +321,7 @@ def test_app_renders_every_tab_for_every_grain_and_filter(db, monkeypatch):
     assert "h.db" in at.caption[-1].value          # really reading the test history
     assert not at.exception
     assert [t.label for t in at.tabs] == ["Overview", "Breaks", "Tickets & SLA", "Funds",
-                                          "Run health"]
+                                          "Month-end", "Run health"]
     assert [m.label for m in at.metric[:10]] == [
         "Match rate", "Open breaks", "Exposure at risk", "Aged over 5 days",
         "Avg days to clear", "Funds over NAV line", "SLA on time", "Overdue tickets",
@@ -343,6 +336,9 @@ def test_app_renders_every_tab_for_every_grain_and_filter(db, monkeypatch):
     at.multiselect[0].set_value(["GEF"]).run()
     at.multiselect[2].set_value(["Price Break"]).run()
     assert not at.exception
+    for month in (date(2026, 11, 1), date(2026, 9, 1)):        # in progress, partial
+        at.selectbox(key="me_month").set_value(month).run()
+        assert not at.exception, month
     assert "h.db" in at.caption[-1].value
 
 
