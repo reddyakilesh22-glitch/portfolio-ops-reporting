@@ -31,12 +31,20 @@ flowchart TD
     W --> OUT["output/DATE/<br/>report .xlsx, breaks .csv,<br/>data_quality .csv, run.log"]
 ```
 
+There are two runs. The **weekly** run above produces the 7-tab report. The
+**daily** run (section "Daily run and history" below) reconciles each business
+day, explains timing breaks with pending trades, and stores the results in a
+SQLite history that feeds the analysts' exceptions file and the dashboard.
+
 ## Repository map
 
 ```
 opsreport/                 the application
-  __main__.py              command line: arguments, logging, exit codes
-  pipeline.py              runs the stages in order; builds the audit trail
+  __main__.py              command line: run (weekly), daily, backfill
+  pipeline.py              the weekly run; builds the audit trail
+  daily.py                 the daily run: pending trades, break IDs, tickets, history
+  history.py               SQLite history store (one row set per business day)
+  dashboard_data.py        every number on the dashboard, from the history
   config.py                reads .env and the YAML files in config/
   calendar.py              business-day maths with market holidays
   extract/
@@ -44,11 +52,15 @@ opsreport/                 the application
     jira_client.py         Jira REST client, field mapping, snapshots
   validate/checks.py       data-quality rules (ERROR stops the run)
   reconcile/positions.py   compares the two books; classifies each break
+  reconcile/pending.py     Expected vs Actionable, using pending trades
   transform/
     aum.py                 AUM by fund and week-over-week change
     jira_metrics.py        open / overdue / aging / SLA, as of a date
-  report/excel_report.py   writes the 7-tab workbook
+  report/excel_report.py   writes the 7-tab weekly workbook
+  report/exceptions_report.py  the analysts' daily exceptions workbook
   ai/commentary.py         optional LLM commentary plus its fact-checker
+
+dashboard/app.py           leadership dashboard (Streamlit); draws only
 
 config/                    everything that changes without code changes
   funds.yaml               the funds and their custodian account numbers
@@ -62,9 +74,12 @@ data/
   raw/<date>/              the three input workbooks for each week
   expected/                answer keys: the breaks planted in the test data
   snapshots/               saved Jira pulls, so runs are reproducible offline
+  daily/                   generated daily inputs (not in git; regenerate in ~5s)
+  history.db               the daily history (not in git; rebuilt by backfill)
 
 scripts/                   one-off helpers, not part of the weekly run
-  generate_excel_data.py   creates the synthetic workbooks and answer keys
+  generate_excel_data.py   creates the weekly synthetic workbooks and answer keys
+  generate_daily_data.py   six months of daily inputs, answer keys, linked tickets
   jira_setup.py            creates the demo Jira project and custom fields
   seed_jira.py             fills it with 160 synthetic tickets
 
@@ -169,6 +184,79 @@ Described in [AI_COMMENTARY.md](AI_COMMENTARY.md). In short: Python computes
 every number; a local model only writes sentences; a fact-checker verifies
 each number in the draft; on failure it retries once, then uses a fixed template.
 
+## Daily run and history
+
+```mermaid
+flowchart TD
+    D["python -m opsreport daily --as-of DATE"] --> L["Load custodian, accounting,<br/>FX and pending trades"]
+    L --> Q{"Data-quality<br/>ERROR?"}
+    Q -->|"yes"| F["Save the day as FAILED<br/>with its errors. Exit 2"]
+    Q -->|"no"| R["Reconcile<br/>(same rules as weekly)"]
+    R --> P["Pending-trade matching:<br/>Expected or Actionable"]
+    P --> I["Break IDs carried from the<br/>previous successful run"]
+    I --> T["Link Jira tickets by break label;<br/>ticket status as of the run date"]
+    T --> S[("history.db<br/>replace this day, one transaction")]
+    T --> X["Exceptions workbook<br/>output/daily/DATE/"]
+    S --> DB["Dashboard"]
+```
+
+**Pending-trade matching** (`reconcile/pending.py`) applies only to quantity
+and missing-position breaks. The open trades on the position must explain the
+*whole* quantity difference (buys and sells net off). If they do and no
+settlement date has passed, the break is Expected. If a settlement date has
+passed, it is Actionable with "settlement failed". If they explain only part,
+it is Actionable and the note gives the unexplained amount. An open trade on a
+position with no break is reported as a warning (stale trade report, or a
+trade never booked).
+
+**Break IDs** (`daily.py`) are `BRK-<first seen>-<fund>-<ISIN>`. If the same
+fund and security was a break in the previous *successful* run, today's break
+inherits its ID and first-seen date; `days_open` is business days since then.
+Re-running an earlier day after later days exist does not re-chain the later
+days; re-run the backfill from that day instead.
+
+**Tickets** are linked through a Jira label `break-<ID>`, so no extra Jira
+field is needed. Ticket status is computed *as of the run date* (Open, Overdue,
+Resolved), not taken from Jira's current status, so history stays true to the
+day. A ticket whose own dates are incomplete is linked but shown as Unknown.
+
+**History store** (`history.py`, SQLite, schema version checked on open):
+
+| Table | One row per | Holds |
+|---|---|---|
+| `runs` | business day | status OK / FAILED, counts, actionable $, errors, warnings, message, git commit, input fingerprints |
+| `breaks` | day and break | type, status, explanation, likely cause, exposure, materiality, pricing vendor, first seen, days open, ticket and its status that day |
+| `aum_daily` | day and fund | AUM components and the custodian total |
+| `data_quality` | finding | severity, rule, detail, record |
+| `tickets` | ticket | the latest Jira snapshot, with each ticket's break ID |
+
+Saving a day deletes and re-inserts that day's rows in one transaction, so a
+re-run is safe and a crash leaves the previous version intact. A failed day
+is saved with its errors and no breaks.
+
+**Backfill** runs each business day in order (NYSE calendar), records a bad
+day and continues, writes the exceptions file only for the last day, and exits
+2 if any day failed.
+
+## Dashboard
+
+`dashboard/app.py` only lays out filters, tiles and charts. Every figure comes
+from `opsreport/dashboard_data.py`, which is unit-tested:
+
+| Figure | Definition |
+|---|---|
+| As of | The last successful run inside the selected date range |
+| Open breaks, exposure, aged, AUM | Point-in-time on the as-of day; actionable breaks only |
+| Change arrows | Same figure for the same-length range just before |
+| Open breaks over time | Actionable break-days in each period ÷ business days run in it |
+| SLA on time | Tickets resolved in the range (or period) that met their due date |
+| AUM over time | Value on the last run of each period |
+| Recurring causes | Separate breaks per root cause (failed settlement, price by vendor, ...), not days, so one stuck break can't dominate |
+
+Weekly periods end on Friday; monthly periods start on the 1st. The chart
+colours are a fixed, colour-blind-checked palette: each break type keeps its
+colour under any filter, and every chart has a table view.
+
 ## Security
 
 - **Untrusted text stays text.** Ticket summaries come from Jira and security
@@ -200,6 +288,9 @@ each number in the draft; on failure it retries once, then uses a fixed template
 | `test_metrics_and_pipeline.py` | Point-in-time ticket logic, holidays, and a full end-to-end run |
 | `test_cli.py` | Exit codes and clean error messages |
 | `test_ai_commentary.py` | The fact-checker rejects wrong drafts and accepts correct ones |
+| `test_daily_data.py` | The daily generator: every day reconciles exactly to its answer key; tickets link to breaks; the trend is present |
+| `test_daily_run.py` | Pending-trade rules, loader validation, break IDs and days open, point-in-time ticket status, idempotent re-runs, failed days, the exceptions file, CLI |
+| `test_dashboard.py` | Dashboard figures against direct calculations, filters, grouping consistency across grains, run health, and the real app rendered with every grain and filter |
 
 Tests read a frozen copy of the Jira snapshot (`tests/fixtures/snapshots/`), so
 replacing the real one with a fresh pull can't change test results.
@@ -221,6 +312,9 @@ CI (GitHub Actions) runs on every push and pull request:
   stops the run with a message naming the file, sheet and record.
 - **Reproducible.** Inputs are fingerprinted, Jira pulls are saved, and the
   synthetic data is generated from fixed random seeds.
+- **One source of truth.** The exceptions file, the dashboard and every period
+  view read the same daily rows.
 - **Known simplifications.** One holiday calendar for all markets; AUM is total
   assets, not net of liabilities; each position gets one break type even if two
-  things are wrong; all data is synthetic.
+  things are wrong; trades don't move cash; daily tickets are generated with
+  the data rather than created in Jira; all data is synthetic.

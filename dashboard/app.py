@@ -118,7 +118,7 @@ st.caption(f"Reconciliation breaks, ops tickets and AUM from the daily runs · h
            f"{h.first:%d %b %Y} to {h.last:%d %b %Y} · synthetic data")
 
 # One row of filters above everything they control.
-c = st.columns([1.3, 1.2, 1.4, 1.4, 1.4, 1.1])
+c = st.columns([1.6, 1.2, 1.4, 1.4, 1.4, 1.1])
 grain = c[0].segmented_control("Period", dd.GRAINS, default="Weekly") or "Weekly"
 preset = c[1].selectbox("Date range", PRESETS, index=2)
 fund_sel = c[2].multiselect("Fund", list(names), format_func=lambda k: names[k],
