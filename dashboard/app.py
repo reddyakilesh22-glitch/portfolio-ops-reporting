@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 
 import altair as alt
@@ -20,7 +21,9 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from opsreport import dashboard_data as dd  # noqa: E402
+from opsreport import monthend  # noqa: E402
 from opsreport.report.excel_report import _kind, _label  # noqa: E402
+from opsreport.report.monthend_report import pack_name, write_monthend  # noqa: E402
 from opsreport.transform.aum import fund_names  # noqa: E402
 
 DB = Path(os.environ.get("OPSREPORT_DB", dd.DB_PATH))
@@ -223,7 +226,8 @@ row2[4].metric("AUM", money(now["aum"]),
                delta("aum", lambda x: f"{'+' if x >= 0 else '-'}{money(abs(x))}"),
                delta_color="off", border=True, help="Fund accounting, incl. accrued income")
 
-tabs = st.tabs(["Overview", "Breaks", "Tickets & SLA", "Funds", "Run health"])
+tabs = st.tabs(["Overview", "Breaks", "Tickets & SLA", "Funds", "Month-end",
+                "Run health"])
 
 # ---------------------------------------------------------------- overview
 with tabs[0]:
@@ -521,8 +525,52 @@ with tabs[3]:
                         width="stretch")
         show_data(at.drop(columns="period"), "aum")
 
-# -------------------------------------------------------------- run health
+# --------------------------------------------------------------- month-end
+STATUS_TAG = {monthend.READY: "✓ Ready to sign", monthend.ATTENTION: "▲ Needs attention",
+              monthend.IN_PROGRESS: "… In progress"}
+
+
+@st.cache_data(ttl=300)
+def signoff_pack(path: str, mtime: float, month: date, funds: tuple[str, ...]) -> bytes:
+    buf = BytesIO()
+    write_monthend(monthend.month_end(load(path, mtime), month, funds), buf)
+    return buf.getvalue()
+
+
 with tabs[4]:
+    months = monthend.months(h)
+    default = monthend.default_month(h)
+    pick = st.columns([1, 3])[0].selectbox("Month", months, index=months.index(default),
+                        format_func=lambda d: f"{d:%B %Y}", key="me_month")
+    m = monthend.month_end(h, pick, tuple(fund_sel))
+    if m.in_progress:
+        st.info(f"{m.title} is not over: last run {m.as_of:%a %d %b}, month ends "
+                f"{m.month_end:%a %d %b}. This shows where each fund would stand if the "
+                "month ended today.")
+    else:
+        st.caption(f"Checks as of the month's last business day, "
+                   f"{m.month_end:%A %d %B %Y}. Only the fund filter applies.")
+    counts = m.funds["status"].value_counts()
+    t = st.columns(4)
+    t[0].metric("Ready to sign", f"{counts.get(monthend.READY, 0)} of {len(m.funds)}",
+                border=True)
+    t[1].metric("Needs attention", int(counts.get(monthend.ATTENTION, 0)), border=True)
+    t[2].metric("Days run OK", f"{len(m.days) - len(m.failed_days) - len(m.missing_days)} "
+                               f"of {len(m.days)}" if not m.in_progress else "n/a",
+                border=True, help="Business days in the month with a successful run")
+    t[3].metric("Open breaks at month-end", int(m.funds["open_breaks"].sum()), border=True)
+    st.subheader("Readiness by fund")
+    table(m.funds.assign(status=m.funds["status"].map(STATUS_TAG)), key="me_funds")
+    st.subheader("Checks")
+    st.caption("✓ passed · ✗ needs attention, with the detail")
+    table(monthend.check_matrix(m), key="me_checks")
+    st.download_button(
+        "Download sign-off pack (Excel)",
+        signoff_pack(str(DB), DB.stat().st_mtime, pick, tuple(fund_sel)),
+        pack_name(m), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# -------------------------------------------------------------- run health
+with tabs[5]:
     rh = dd.run_health(h, f)
     m = st.columns(4)
     m[0].metric("Days run OK", f"{rh['ok_days']} of {rh['expected_days']}", border=True)

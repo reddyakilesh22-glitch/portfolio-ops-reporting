@@ -4,6 +4,7 @@
     python -m opsreport run --as-of 2026-11-13 --jira live
     python -m opsreport daily --as-of 2026-11-13                       one day
     python -m opsreport backfill --from 2026-05-18 --to 2026-11-13     every day
+    python -m opsreport monthend --month 2026-10                       sign-off pack
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from datetime import date
 from pathlib import Path
 
 from opsreport import daily
-from opsreport.config import ConfigError
+from opsreport.config import ROOT, ConfigError
 from opsreport.extract.excel_loader import RAW_DIR, SourceFileError
 from opsreport.extract.jira_client import JiraError
 from opsreport.history import DB_PATH, HistoryError
@@ -26,6 +27,14 @@ from opsreport.pipeline import OUTPUT_DIR, DataQualityError, SnapshotExistsError
 KNOWN_FAILURES = (SourceFileError, JiraError, ConfigError, FileNotFoundError,
                   SnapshotExistsError, HistoryError)
 _trace = logging.getLogger("opsreport.trace")
+MONTHEND_OUT = ROOT / "output" / "monthend"
+
+
+def _month(text: str) -> date:
+    try:
+        return date.fromisoformat(f"{text}-01")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM, got {text!r}") from None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,6 +75,11 @@ def main(argv: list[str] | None = None) -> int:
                        help="Jira snapshot holding the break tickets")
         d.add_argument("--out", type=Path, default=daily.DAILY_OUT)
         d.add_argument("-v", "--verbose", action="store_true")
+    m = sub.add_parser("monthend", help="month-end sign-off pack from the history store")
+    m.add_argument("--month", type=_month, required=True, help="YYYY-MM")
+    m.add_argument("--db", type=Path, default=DB_PATH, help="history database")
+    m.add_argument("--out", type=Path, default=MONTHEND_OUT)
+    m.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
     _setup_logging(args.out, args.verbose)
@@ -74,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_daily(args, log)
     if args.cmd == "backfill":
         return _run_backfill(args, log)
+    if args.cmd == "monthend":
+        return _run_monthend(args, log)
     try:
         res = run(args.as_of, args.prior, args.jira, args.snapshot, args.out,
                   args.allow_errors, args.commentary, args.model,
@@ -135,6 +151,29 @@ def _run_backfill(args: argparse.Namespace, log: logging.Logger) -> int:
     for r in failed:
         print(f"  FAILED {r.as_of}: {r.message}")
     return 2 if failed else 0
+
+
+def _run_monthend(args: argparse.Namespace, log: logging.Logger) -> int:
+    from opsreport import dashboard_data, monthend
+    from opsreport.report.monthend_report import pack_name, write_monthend
+
+    try:
+        if not args.db.exists():
+            raise FileNotFoundError(f"No history at {args.db}; run `opsreport backfill` first")
+        h = dashboard_data.load(args.db)
+        if args.month not in monthend.months(h):
+            raise FileNotFoundError(f"No successful run in {args.month:%Y-%m} in {args.db}")
+        m = monthend.month_end(h, args.month)
+    except KNOWN_FAILURES as exc:
+        return _known_failure(log, exc, args.out)
+    path = write_monthend(m, args.out / f"{args.month:%Y-%m}" / pack_name(m))
+    if m.in_progress:
+        log.warning("%s is not over: last run %s, month ends %s", m.title, m.as_of,
+                    m.month_end)
+    print(f"\nSign-off pack: {path}")
+    for r in m.funds.itertuples():
+        print(f"  {r.fund_code:<5} {r.status:<16} {r.reasons}")
+    return 0
 
 
 if __name__ == "__main__":
