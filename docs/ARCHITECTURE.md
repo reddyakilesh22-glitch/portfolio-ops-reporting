@@ -220,19 +220,25 @@ field is needed. Ticket status is computed *as of the run date* (Open, Overdue,
 Resolved), not taken from Jira's current status, so history stays true to the
 day. A ticket whose own dates are incomplete is linked but shown as Unknown.
 
-**History store** (`history.py`, SQLite, schema version checked on open):
+**History store** (`history.py`, SQLite, schema version 2):
 
 | Table | One row per | Holds |
 |---|---|---|
 | `runs` | business day | status OK / FAILED, counts, actionable $, errors, warnings, message, git commit, input fingerprints |
 | `breaks` | day and break | type, status, explanation, likely cause, exposure, materiality, pricing vendor, first seen, days open, ticket and its status that day |
-| `aum_daily` | day and fund | AUM components and the custodian total |
+| `aum_daily` | day and fund | AUM components, the custodian total, holdings compared (for the match rate) and shares outstanding (for NAV impact) |
 | `data_quality` | finding | severity, rule, detail, record |
 | `tickets` | ticket | the latest Jira snapshot, with each ticket's break ID |
 
 Saving a day deletes and re-inserts that day's rows in one transaction, so a
 re-run is safe and a crash leaves the previous version intact. A failed day
 is saved with its errors and no breaks.
+
+The schema version lives in `PRAGMA user_version`. Opening an older database
+upgrades it in place (`MIGRATIONS`: version 1 → 2 adds the two `aum_daily`
+columns). Days saved before a column existed keep NULL there, and the dashboard
+shows n/a for them rather than a wrong number; a backfill fills them in. A
+database from a *newer* version of the code is refused.
 
 **Backfill** runs each business day in order (NYSE calendar), records a bad
 day and continues, writes the exceptions file only for the last day, and exits
@@ -252,10 +258,37 @@ from `opsreport/dashboard_data.py`, which is unit-tested:
 | SLA on time | Tickets resolved in the range (or period) that met their due date |
 | AUM over time | Value on the last run of each period |
 | Recurring causes | Separate breaks per root cause (failed settlement, price by vendor, ...), not days, so one stuck break can't dominate |
+| Match rate | 1 − breaks ÷ holdings compared (a holding on either side counts once). Second line leaves out Expected breaks. Only the fund filter applies |
+| Aging profile | Open breaks per day by age band (`aging_bands` in `config/recon.yaml`); the 6+ bands equal the "aged over 5 days" tile |
+| Roll-forward | Per successful run: *new* = actionable today but not on the previous run; *cleared* = the reverse. Failed days are skipped, so opening + new − cleared = closing holds exactly for any filter and grain |
+| Days to clear | Business days from first seen to the run on which the break was gone |
+| NAV impact | Per fund: sum of signed `base_mv_diff` on actionable breaks, excluding failed settlements, ÷ shares outstanding (cents per share) and ÷ AUM (% of NAV). Levels from `nav_impact` in `config/recon.yaml` |
 
 Weekly periods end on Friday; monthly periods start on the 1st. The chart
 colours are a fixed, colour-blind-checked palette: each break type keeps its
 colour under any filter, and every chart has a table view.
+
+## Month-end sign-off
+
+`monthend.py` builds a `MonthEnd` for a calendar month from the same history
+and the same `dashboard_data` functions, so the pack, the dashboard tab and
+the daily figures can't disagree. Five checks per fund on the month's last
+business day:
+
+| Check | Source |
+|---|---|
+| Every day reconciled | `runs`: no FAILED day, no business day without a run |
+| No high-materiality break | open actionable breaks with materiality High |
+| NAV impact under 1¢ a share | `nav_impact_daily` on that day |
+| No break older than 10 days | `days_open` above the last age band |
+| No overdue ticket | tickets open and past due *as of* that day |
+
+Status: Ready to sign (all pass), Needs attention (reasons listed by problem,
+e.g. `Overdue tickets: 1 (OPSREC-107)`), or In progress (the last business day
+hasn't run yet; checks show where the fund would stand today).
+`report/monthend_report.py` writes the pack (Sign-off with blank sign-off
+columns, Checks, Open at Month-end, Roll-forward, NAV Impact, Run Log) to a
+file for `opsreport monthend` or to memory for the dashboard's download button.
 
 ## Security
 
@@ -290,7 +323,8 @@ colour under any filter, and every chart has a table view.
 | `test_ai_commentary.py` | The fact-checker rejects wrong drafts and accepts correct ones |
 | `test_daily_data.py` | The daily generator: every day reconciles exactly to its answer key; tickets link to breaks; the trend is present |
 | `test_daily_run.py` | Pending-trade rules, loader validation, break IDs and days open, point-in-time ticket status, idempotent re-runs, failed days, the exceptions file, CLI |
-| `test_dashboard.py` | Dashboard figures against direct calculations, filters, grouping consistency across grains, run health, and the real app rendered with every grain and filter |
+| `test_dashboard.py` | Dashboard figures against direct calculations, filters, grouping consistency across grains, run health, exact identities (roll-forward, aging bands, match-rate counts), failed settlements never reaching NAV impact, and the real app rendered with every grain and filter |
+| `test_monthend.py` | A hand-built clean month is Ready to sign; each check is then failed alone and must fail only that fund and check; failed and missing days; a month in progress; the pack's tabs and rows; CLI errors |
 
 Tests read a frozen copy of the Jira snapshot (`tests/fixtures/snapshots/`), so
 replacing the real one with a fresh pull can't change test results.
@@ -315,6 +349,8 @@ CI (GitHub Actions) runs on every push and pull request:
 - **One source of truth.** The exceptions file, the dashboard and every period
   view read the same daily rows.
 - **Known simplifications.** One holiday calendar for all markets; AUM is total
-  assets, not net of liabilities; each position gets one break type even if two
+  assets, not net of liabilities; shares outstanding are fixed per fund (real
+  funds update them daily); the synthetic funds are small, so ordinary breaks
+  cross the 1-cent line more often than at a large fund; each position gets one break type even if two
   things are wrong; trades don't move cash; daily tickets are generated with
   the data rather than created in Jira; all data is synthetic.

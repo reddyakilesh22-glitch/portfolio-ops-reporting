@@ -2,8 +2,9 @@
 
 A Python pipeline that checks an investment firm's two records of what its
 funds own against each other **every business day**, keeps the history, and
-turns it into three products: a daily to-do list for operations analysts, a
-weekly report, and a leadership dashboard.
+turns it into four products: a daily to-do list for operations analysts, a
+weekly report, a leadership dashboard, and a month-end sign-off pack for fund
+controllers.
 
 > A self-directed project modelling a real reporting workflow in asset
 > management. All data is synthetic.
@@ -11,7 +12,7 @@ weekly report, and a leadership dashboard.
 **New to this industry?** Start with [docs/CONCEPTS.md](docs/CONCEPTS.md): the
 business explained with everyday analogies and a glossary.
 
-![Leadership dashboard: KPI tiles, open breaks over time by type, top recurring causes, SLA and exposure trends](docs/images/dashboard_overview.png)
+![Leadership dashboard: match rate, open breaks, exposure, aging, days to clear, funds over the NAV line, SLA; open breaks over time by type, top recurring causes, break roll-forward and match rate trends](docs/images/dashboard_overview.png)
 
 ## The problem, in plain English
 
@@ -35,15 +36,16 @@ it is agreed but reaches the bank a day or two later. Those are **Expected**
 and need no action. The rest are **Actionable** and get a Jira ticket with a
 deadline.
 
-## Three products, three audiences
+## Four products, four audiences
 
 | Product | Who uses it | Question it answers | How often |
 |---|---|---|---|
 | **Exceptions file** (Excel) | Ops analysts | What do I need to fix today, most urgent first? | Every business day |
-| **Weekly report** (Excel, 7 tabs) | Ops leads, fund controllers | Where do we stand this week: breaks, fund values, ticket deadlines? | Weekly |
-| **Dashboard** (web) | Managers, leadership | Are we keeping up? Which team, fund or root cause is the problem? Daily, weekly or monthly | Any time |
+| **Weekly report** (Excel, 7 tabs) | Ops leads | Where do we stand this week: breaks, fund values, ticket deadlines? | Weekly |
+| **Dashboard** (web) | Managers, leadership | Are we keeping up? Which team, fund or root cause is the problem? Could any fund's price be wrong? Daily, weekly or monthly | Any time |
+| **Month-end sign-off pack** (Excel) | Fund controllers | Is each fund ready to sign off for the month, and if not, why not? | Monthly |
 
-All three read the same daily results, so they cannot disagree with each other.
+All four read the same daily results, so they cannot disagree with each other.
 
 ## Pain points this solves
 
@@ -56,6 +58,9 @@ All three read the same daily results, so they cannot disagree with each other.
 | "They don't match" with no idea why | Each break is labelled with a type, a likely cause, and an ID it keeps until it is fixed |
 | Nobody knows which tickets are late | Each break is linked to its Jira ticket; open, overdue and on-time rates per team |
 | Leadership sees today, never the trend | Six months of daily history, viewable by day, week or month, with the top recurring causes |
+| "How many breaks?" doesn't say whether we're keeping up | Industry measures: match rate, aging bands, a break roll-forward (opened, cleared, still open) and average days to clear |
+| Nobody can say whether a break could make a fund's price wrong | Potential NAV impact per fund in cents per share, against the 1-cent and 0.5% lines used in US fund practice |
+| Month-end sign-off is a scramble through spreadsheets | Five checks per fund give Ready to sign or Needs attention, with the reasons, in a pack ready to sign |
 | An upstream change breaks the script at 7am | A runbook maps each error message to a cause and an action; a failed day is recorded, not skipped silently |
 
 ## How it works, end to end
@@ -83,6 +88,7 @@ flowchart LR
         X1["Exceptions file<br/>analysts, daily"]
         X2["Weekly report<br/>ops leads"]
         D["Dashboard<br/>leadership"]
+        M["Sign-off pack<br/>controllers, monthly"]
     end
 
     C --> V
@@ -94,6 +100,7 @@ flowchart LR
     V -->|"yes"| R --> E --> T --> H
     T --> X1
     H --> D
+    H --> M
     R -.-> X2
 ```
 
@@ -106,7 +113,8 @@ flowchart LR
    appears until it clears, and is linked to its ticket.
 3. **History.** Each day's results are saved, including days that failed.
 4. **Products.** The analysts' exceptions file is written each morning; the
-   dashboard reads the history; the weekly report runs on Fridays.
+   dashboard reads the history; the weekly report runs on Fridays; the
+   sign-off pack is built from the history once the month is over.
 
 The step-by-step technical version, with a module map, is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -126,13 +134,26 @@ The step-by-step technical version, with a module map, is in
 tabs: Summary, Breaks, AUM, Ops SLA, Overdue Tickets, Data Quality, Run Info.
 
 **Dashboard:** filters for period (daily, weekly, monthly), date range, fund,
-ops team, break type and materiality. Tabs: Overview, Breaks, Tickets & SLA,
-Funds, Run health.
+ops team, break type and materiality.
 
-In the sample data (six months to 13 Nov 2026): 5 funds worth $404M; open
-breaks per day roughly triple from October as fixes slow down; the top
-recurring cause is one pricing vendor (40% of breaks). That is the kind of
-pattern the dashboard is built to surface.
+| Tab | What it shows |
+|---|---|
+| Overview | Ten headline tiles; open breaks over time by type; top recurring causes; break roll-forward; match rate; tickets fixed on time; exposure |
+| Breaks | Aging profile over time and today; every open break; securities that keep breaking |
+| Tickets & SLA | Each ops team's open, overdue and on-time figures; ticket ages |
+| Funds | Per fund: AUM, match rate, open breaks; potential NAV impact against the 1-cent line; AUM over time |
+| Month-end | Each fund Ready to sign or Needs attention, the five checks, and the pack to download |
+| Run health | Every business day OK, failed or missing; data-quality findings |
+
+**Monthly:** `output/monthend/<yyyy-mm>/monthend_signoff_<yyyymm>.xlsx` with
+tabs Sign-off, Checks, Open at Month-end, Roll-forward, NAV Impact, Run Log.
+
+In the sample data (six months to 13 Nov 2026): 5 funds worth $404M. From
+October, open breaks per day roughly triple and the match rate falls from about
+92% to 79%. The top recurring cause is one pricing vendor (40% of breaks), and
+its wrong prices are what push funds over the 1-cent NAV line. In October only
+1 of 5 funds is ready to sign at month-end, against 3 of 5 in June. That is the
+kind of pattern the dashboard is built to surface.
 
 ## Try it
 
@@ -153,6 +174,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 # One day, as an analyst would each morning
 .venv/bin/python -m opsreport daily --as-of 2026-11-13
 
+# The month-end sign-off pack for October
+.venv/bin/python -m opsreport monthend --month 2026-10
+
 # The weekly report (sample files are included)
 .venv/bin/python -m opsreport run --as-of 2026-11-13 --prior 2026-11-06
 
@@ -164,6 +188,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 |---|---|
 | `daily --as-of DATE` | Reconcile one business day, save it to the history, write the exceptions file |
 | `backfill --from A --to B` | Run every business day in a range, in order. A bad day is recorded and the rest continue |
+| `monthend --month YYYY-MM` | The month-end sign-off pack, from the history |
 | `run --as-of DATE --prior DATE` | The weekly report |
 | `run ... --jira live` | Pull tickets from Jira now (needs `.env`) instead of the saved copy |
 | `run ... --commentary local-llm` | Have a local AI model write the summary; see [AI commentary](docs/AI_COMMENTARY.md) |
@@ -197,6 +222,7 @@ opsreport/          the application
   daily.py          the daily run and backfill
   history.py        the SQLite history store
   dashboard_data.py every number on the dashboard
+  monthend.py       the month-end sign-off checks
   pipeline.py       the weekly run
 dashboard/app.py    the leadership dashboard (Streamlit)
 config/             settings: column names, tolerances, holidays, funds
@@ -226,7 +252,8 @@ optionally Ollama for a local language model.
 ## Limits
 
 This is a learning project, not production software. The data is synthetic;
-fund value is simplified to total assets; one holiday calendar is used for all
+fund value is simplified to total assets; the funds are small and their shares
+outstanding fixed, so the NAV-impact figures are illustrative; one holiday calendar is used for all
 markets; trades don't move cash; tickets in the daily history are generated
 alongside the breaks rather than created in Jira (creating them automatically
 is the next step); and the AI fact-checker catches wrong numbers, not every

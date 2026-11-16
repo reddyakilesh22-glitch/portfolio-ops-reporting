@@ -5,6 +5,7 @@ business day, keep the history, and report it: a daily exceptions file for
 analysts, a weekly report for ops leads, and a dashboard for leadership.
 **Cadence:** Daily run each business morning for the previous business day.
 Weekly report for the Friday date, Monday before the 10:00 ops review.
+Month-end sign-off pack after the month's last business day has run.
 **Owner:** Reporting analyst. **Consumers:** Ops analysts and leads
 (Reconciliation, NAV Oversight, Trade Support, Corporate Actions, Reference
 Data), fund controllers, operations leadership.
@@ -59,6 +60,24 @@ It shows whatever is in the history: run the daily job first. The **Run
 health** tab shows every business day as OK, FAILED or missing; check it
 before presenting numbers. "As of" on the dashboard is the last *successful*
 run in the selected range.
+
+### Month-end sign-off
+After the last business day of the month has run:
+```bash
+python -m opsreport monthend --month 2026-10
+# -> output/monthend/2026-10/monthend_signoff_202610.xlsx
+```
+The console lists each fund's status and reasons. Send the pack to the fund
+controllers. Before sending:
+- **Run Log** tab: every business day ran. A failed or missing day fails every
+  fund's first check: fix and re-run that day (and the backfill after it), then
+  re-run `monthend`.
+- **Needs attention** is normal, not a run failure. The reasons say what is
+  open; the controller decides whether to wait for a fix or sign with a comment.
+- If the console says the month **is not over**, you ran it early: the figures
+  are a preview.
+The dashboard's **Month-end** tab shows the same checks and downloads the
+same pack.
 
 ## 1. Weekly run checklist
 
@@ -143,7 +162,10 @@ unexpected error (a bug): open an issue with the log attached.
 | `Settlement failed: ... was due` (Action Today) | Shares or cash didn't arrive on the settlement date | Chase the custodian or executing broker; the ticket is Trade Support's |
 | `Unknown (ticket data incomplete)` (ticket status) | The linked Jira ticket is Done with no Resolved Business Date | Fill in the date in Jira; the ticket is also on the Data Quality tab |
 | `no_ticket_snapshot` (DQ warning) | The Jira snapshot file is missing | Breaks are still reported, without tickets; restore the snapshot |
-| `HistoryError: ... schema version` | `history.db` was built by a different version of the code | Rebuild: delete it and run `backfill` (inputs are kept, so nothing is lost) |
+| `HistoryError: ... schema version` | `history.db` was written by a *newer* version of the code (older ones are upgraded automatically) | Update the code, or rebuild: delete it and run `backfill` (inputs are kept, so nothing is lost) |
+| Dashboard shows **n/a** for match rate or NAV impact on older days | Those days were saved before holdings and shares were recorded | Re-run `backfill` over that range |
+| `No successful run in YYYY-MM` (monthend) | The month hasn't been run, or `--db` points at another history | Run the daily job or backfill for that month first |
+| Month-end reason `Days not reconciled` | A failed or missing daily run in the month | Fix and re-run those days, then re-run `monthend` |
 | Dashboard says `No history found` | `data/history.db` not built yet, or `OPSREPORT_DB` points elsewhere | Run `backfill`, or fix the path |
 
 ### DQ errors (exit 2)
