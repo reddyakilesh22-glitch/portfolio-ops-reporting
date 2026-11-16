@@ -1,25 +1,33 @@
 # Fund reference data. `code` is the fund accounting system's key; the
 # custodian identifies funds by account number and uses `custodian_sheet`
 # as the worksheet name in its holdings statement.
+# `shares_outstanding` turns a dollar difference into cents per share for the
+# NAV-impact check (synthetic and held fixed: real funds update it daily from
+# the transfer agent).
 base_currency: USD
 funds:
   - code: GEF
     name: Global Equity Fund
     custodian_account: 4471-GEF-01
     custodian_sheet: "4471-GEF-01"
+    shares_outstanding: 4500000
   - code: USCB
     name: US Core Bond Fund
     custodian_account: 4471-UCB-02
     custodian_sheet: "4471-UCB-02"
+    shares_outstanding: 8000000
   - code: EMD
     name: Emerging Markets Debt Fund
     custodian_account: 4471-EMD-03
     custodian_sheet: "4471-EMD-03"
+    shares_outstanding: 7000000
   - code: ISC
     name: International Small Cap Fund
     custodian_account: 4471-ISC-04
     custodian_sheet: "4471-ISC-04"
+    shares_outstanding: 3000000
   - code: MAI
     name: Multi-Asset Income Fund
     custodian_account: 4471-MAI-05
     custodian_sheet: "4471-MAI-05"
+    shares_outstanding: 4000000

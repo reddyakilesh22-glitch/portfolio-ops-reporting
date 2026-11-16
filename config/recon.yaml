@@ -19,3 +19,16 @@ materiality:
 
 # FX: accounting rates must match the official 4pm file within this tolerance.
 fx_rate_rel_tol: 0.0001
+
+# Potential NAV impact of open actionable breaks, per fund: the net unexplained
+# difference if the books are the side that is wrong. Common US fund practice
+# (ICI guidance; individual funds' NAV error policies): an error of 1 cent per
+# share or more is a NAV error reported to the fund board; 0.5% of NAV or more
+# usually means reprocessing shareholder purchases and redemptions.
+nav_impact:
+  per_share_usd: 0.01
+  pct_of_nav: 0.005
+
+# Age bands for open actionable breaks, in business days (upper bounds; the
+# last band is open-ended). Matches the "aged" cut-off of more than 5 days.
+aging_bands: [1, 5, 10]

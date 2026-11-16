@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from opsreport.calendar import busday_count, holidays, is_business_day
-from opsreport.config import ROOT
+from opsreport.config import ROOT, load_yaml
 from opsreport.extract import excel_loader
 from opsreport.extract.excel_loader import SourceFileError
 from opsreport.extract.jira_client import load_snapshot, snapshot_to_frame
@@ -120,6 +120,18 @@ def assign_ids(breaks: pd.DataFrame, prev: pd.DataFrame, as_of: date) -> pd.Data
     return out
 
 
+def with_match_basis(aum: pd.DataFrame, custodian: pd.DataFrame,
+                     accounting: pd.DataFrame) -> pd.DataFrame:
+    """Add what the match rate and NAV impact need: holdings compared per fund
+    (a position on either side counts once) and shares outstanding."""
+    keys = pd.concat([custodian[["fund_code", "isin"]], accounting[["fund_code", "isin"]]])
+    compared = keys.drop_duplicates().groupby("fund_code").size()
+    shares = {f["code"]: f.get("shares_outstanding")
+              for f in load_yaml("funds.yaml")["funds"]}
+    return aum.assign(holdings_compared=aum["fund_code"].map(compared).fillna(0).astype(int),
+                      shares_outstanding=aum["fund_code"].map(shares))
+
+
 def run_daily(as_of: date, raw_dir: Path = DAILY_RAW, db_path: Path = DB_PATH,
               out_dir: Path = DAILY_OUT, snapshot: Path = DAILY_SNAPSHOT,
               write_excel: bool = True) -> DailyResult:
@@ -183,7 +195,8 @@ def run_daily(as_of: date, raw_dir: Path = DAILY_RAW, db_path: Path = DB_PATH,
         breaks = breaks.sort_values(["status", "exposure_usd"], ascending=[True, False])
         cleared = prev[~prev["break_id"].isin(breaks["break_id"])]
         actionable = breaks[breaks["status"] == ACTIONABLE]
-        aum = aum_mod.aum_by_fund(cur["accounting"], cur["custodian"])
+        aum = with_match_basis(aum_mod.aum_by_fund(cur["accounting"], cur["custodian"]),
+                               cur["custodian"], cur["accounting"])
 
         run.update(status="OK", breaks=len(breaks), actionable=len(actionable),
                    expected=int((breaks["status"] == EXPECTED).sum()),
