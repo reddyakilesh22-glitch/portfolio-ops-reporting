@@ -1,6 +1,5 @@
 """Leadership dashboard (issue #23): the numbers, and that the app renders."""
 
-import os
 from datetime import date
 
 import pandas as pd
@@ -185,17 +184,16 @@ def test_run_health_reports_failed_and_missing_days(db, tmp_path):
 
 
 # ----------------------------------------------------------- the app
-def run_app(db, **env):
-    os.environ["OPSREPORT_DB"] = str(db)
-    try:
-        return AppTest.from_file(str(ROOT / "dashboard" / "app.py"),
-                                 default_timeout=60).run()
-    finally:
-        del os.environ["OPSREPORT_DB"]
+def run_app(db, monkeypatch):
+    """Every later .run() re-executes the script, so the variable must stay set
+    for the whole test, or reruns silently read data/history.db instead."""
+    monkeypatch.setenv("OPSREPORT_DB", str(db))
+    return AppTest.from_file(str(ROOT / "dashboard" / "app.py"), default_timeout=60).run()
 
 
-def test_app_renders_every_tab_for_every_grain_and_filter(db):
-    at = run_app(db)
+def test_app_renders_every_tab_for_every_grain_and_filter(db, monkeypatch):
+    at = run_app(db, monkeypatch)
+    assert "h.db" in at.caption[-1].value          # really reading the test history
     assert not at.exception
     assert [t.label for t in at.tabs] == ["Overview", "Breaks", "Tickets & SLA", "Funds",
                                           "Run health"]
@@ -209,8 +207,9 @@ def test_app_renders_every_tab_for_every_grain_and_filter(db):
     at.multiselect[0].set_value(["GEF"]).run()
     at.multiselect[2].set_value(["Price Break"]).run()
     assert not at.exception
+    assert "h.db" in at.caption[-1].value
 
 
-def test_app_explains_how_to_build_a_missing_history(tmp_path):
-    at = run_app(tmp_path / "none.db")
+def test_app_explains_how_to_build_a_missing_history(tmp_path, monkeypatch):
+    at = run_app(tmp_path / "none.db", monkeypatch)
     assert at.error and "backfill" in at.code[0].value

@@ -128,7 +128,8 @@ team_sel = c[3].multiselect("Ops team", sorted(h.tickets["ops_team"].dropna().un
 type_sel = c[4].multiselect("Break type", dd.BREAK_TYPES, placeholder="All types")
 mat_sel = c[5].multiselect("Materiality", dd.MATERIALITY, placeholder="All")
 if preset == "Custom":
-    picked = st.date_input("Custom range", (dd.preset_range("Last 3 months", h.last)),
+    default_start, _ = dd.preset_range("Last 3 months", h.last)
+    picked = st.date_input("Custom range", (max(default_start, h.first), h.last),
                            min_value=h.first, max_value=h.last)
     start, end = (picked if isinstance(picked, tuple) and len(picked) == 2
                   else (h.first, h.last))
