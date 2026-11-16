@@ -1,0 +1,6 @@
+# Dashboard runtime settings (streamlit run dashboard/app.py).
+[client]
+toolbarMode = "viewer"      # hide developer controls such as Deploy
+
+[browser]
+gatherUsageStats = false
